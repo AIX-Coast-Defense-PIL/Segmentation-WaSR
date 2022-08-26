@@ -1,0 +1,2 @@
+image_dir: ../../datasets/SeaShips/images/test
+image_list: ../../datasets/SeaShips/ImageSets/test.txt
