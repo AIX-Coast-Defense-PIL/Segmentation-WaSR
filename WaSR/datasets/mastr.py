@@ -55,7 +55,7 @@ class MaSTr1325Dataset(torch.utils.data.Dataset):
                 image_list = (self.dataset_dir / data['image_list']).resolve()
                 self.images = read_image_list(image_list)
             else:
-                self.images = get_image_list(self.image_dir)
+                self.images = os.listdir(self.image_dir)
 
         self.transform = transform
         self.normalize_t = normalize_t
@@ -69,8 +69,8 @@ class MaSTr1325Dataset(torch.utils.data.Dataset):
             idx = idx.tolist()
 
         img_name = self.images[idx]
-        img_path = str(self.image_dir / ('%s.jpg' % img_name))
-        mask_filename = '%sm.png' % img_name
+        img_path = str(self.image_dir / img_name)
+        mask_filename = 'm'.join(os.path.splitext(img_name))
 
         img = np.array(Image.open(img_path))
         img_original = img
@@ -83,7 +83,7 @@ class MaSTr1325Dataset(torch.utils.data.Dataset):
             data['segmentation'] = mask
 
         if self.imu_dir is not None:
-            imu_path = str(self.imu_dir / ('%s.png' % img_name.replace('_','_imu_')))
+            imu_path = str(self.imu_dir / img_name)
             imu_mask = np.array(Image.open(imu_path))
             data['imu_mask'] = imu_mask
 

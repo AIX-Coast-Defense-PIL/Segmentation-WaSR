@@ -1,0 +1,3 @@
+image_dir: ../../datasets/AiHub/images
+mask_dir: ../../datasets/AiHub/masks
+imu_dir: ../../datasets/AiHub/imus
