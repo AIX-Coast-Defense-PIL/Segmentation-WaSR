@@ -22,7 +22,7 @@ def read_mask(path):
 def read_image_list(path):
     """Reads image list from a file"""
     with open(path, 'r') as file:
-        images = [line.strip() for line in file]
+        images = [line.strip()+'.jpg' for line in file]
     return images
 
 def get_image_list(image_dir):
