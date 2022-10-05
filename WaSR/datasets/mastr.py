@@ -39,7 +39,7 @@ class MaSTr1325Dataset(torch.utils.data.Dataset):
         normalize_t (optional): Transform that normalizes the input image
         include_original (optional): Include original (non-normalized) version of the image in the features
     """
-    def __init__(self, dataset_file, transform=None, normalize_t=None, include_original=False):
+    def __init__(self, dataset_file, transform=None, normalize_t=None, include_original=False, sort=False):
         dataset_file = Path(dataset_file)
         self.dataset_dir = dataset_file.parent
         with dataset_file.open('r') as file:
@@ -56,6 +56,9 @@ class MaSTr1325Dataset(torch.utils.data.Dataset):
                 self.images = read_image_list(image_list)
             else:
                 self.images = os.listdir(self.image_dir)
+            
+            if sort:
+                self.images.sort()
 
         self.transform = transform
         self.normalize_t = normalize_t

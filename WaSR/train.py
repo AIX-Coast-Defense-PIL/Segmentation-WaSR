@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint, TQDMProgressBar
 
 
 import wasr.models as models
@@ -100,6 +100,7 @@ def train_wasr(args):
     logger.log_hyperparams(args)
 
     callbacks = []
+    callbacks.append(TQDMProgressBar(refresh_rate=60))
     if args.validation:
         # Val: Early stopping and best model saving
         if args.patience is not None:

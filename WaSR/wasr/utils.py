@@ -18,7 +18,7 @@ def load_weights(path):
 class ModelExporter(pl.Callback):
     """Exports model weights at the end of the training."""
     def on_fit_end(self, trainer, pl_module):
-        export_path = os.path.join(trainer.log_dir, 'weights.pth')
+        export_path = os.path.join(trainer.log_dir, 'weights.pt')
         torch.save(pl_module.model.state_dict(), export_path)
 
 class IntermediateLayerGetter(nn.ModuleDict):
@@ -103,3 +103,16 @@ def tensor_map(obj, fn):
     else:
         raise TypeError("Invalid type for tensor_map")
 
+
+def get_box_coord(raw_size, x,y,w,h):
+    x *= raw_size[0]
+    y *= raw_size[1]
+    w *= raw_size[0]
+    h *= raw_size[1]
+    
+    x1 = x - w/2
+    x2 = x + w/2
+    y1 = y - h/2
+    y2 = y + h/2
+
+    return [int(round(i,0)) for i in [x1, y1, x2, y2]]

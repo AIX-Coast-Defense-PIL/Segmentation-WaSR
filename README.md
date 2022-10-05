@@ -8,6 +8,9 @@
 ```bash
 sh shell/train_wasr.sh
 sh shell/infer_wasr.sh
+
+# background
+. shell/train_wasr_bg.sh &
 ```
 
 <br/>
