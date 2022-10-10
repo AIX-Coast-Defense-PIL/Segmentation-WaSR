@@ -6,9 +6,6 @@
 [[`BibTeX`](#cite)] 
 
 ```bash
-sh shell/train_wasr.sh
-sh shell/infer_wasr.sh
-
 # background
 . shell/train_wasr_bg.sh &
 ```
@@ -19,9 +16,3 @@ sh shell/infer_wasr.sh
 ---
 #### YOLOv5
 [[`github`](https://github.com/ultralytics/yolov5)] 
-
-```bash
-sh shell/train_yolo.sh
-sh shell/val_yolo.sh
-sh shell/infer_yolo.sh
-```
