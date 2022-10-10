@@ -90,11 +90,8 @@ def predict(args):
 
     output_dir = Path(args.output_dir)
     label_dir = output_dir / 'labels'
-    if not output_dir.exists():
-        output_dir.mkdir(parents=True)
     if not label_dir.exists():
         label_dir.mkdir(parents=True)
-
 
     ###### yolo ######
     dataset_file = Path(args.dataset_config)

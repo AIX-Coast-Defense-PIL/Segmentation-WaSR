@@ -3,4 +3,5 @@ python WaSR/predict_obs.py \
 --model wasr_resnet101 \
 --wasr_weights WaSR/output/logs/my_wasr_no_imu/version_13/weights.pth \
 --yolo_weights yolov5/runs/train/exp2/weights/best.pt \
---output_dir WaSR/output/predictions/test
+--output_dir WaSR/output/predictions/test \
+--batch_size 12

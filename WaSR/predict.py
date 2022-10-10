@@ -60,8 +60,8 @@ def predict(args):
     predictor = Predictor(model, args.fp16)
 
     output_dir = Path(args.output_dir)
-    if not output_dir.exists():
-        output_dir.mkdir(parents=True)
+    if not os.path.exists(output_dir / 'images'):
+        os.makedirs(output_dir / 'images')
 
     for features, labels in tqdm(iter(dl), total=len(dl)):
         pred_masks = predictor.predict_batch(features)
@@ -70,7 +70,7 @@ def predict(args):
             pred_mask = SEGMENTATION_COLORS[pred_mask]
             mask_img = Image.fromarray(pred_mask)
 
-            out_file = output_dir / labels['mask_filename'][i]
+            out_file = output_dir / 'images' / labels['mask_filename'][i]
 
             mask_img.save(out_file)
     

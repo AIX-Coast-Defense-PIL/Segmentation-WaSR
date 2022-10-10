@@ -12,6 +12,7 @@ def get_augmentation_transform():
         A.ISONoise(p=0.5)], p=0.3)
 
     transform = A.Compose([
+        A.RandomCrop(256, 384),
         A.HorizontalFlip(),
         A.ShiftScaleRotate(scale_limit=[0,0.3], rotate_limit=15, border_mode=0, p=0.7),
         color_transform,
@@ -23,7 +24,7 @@ def get_augmentation_transform():
 
 def get_image_resize():
     transform = A.Compose([
-        A.Resize(384, 640),
+        A.Resize(384, 512),
     ])
 
     return AlbumentationsTransform(transform)

@@ -48,7 +48,8 @@ def get_arguments(input_args=None):
     parser.add_argument("--workers", type=int, default=NUM_WORKERS, help="Number of workers used for data loading.")
     parser.add_argument("--random_seed", type=int, default=RANDOM_SEED, help="Random seed to have reproducible results.")
     parser.add_argument("--pretrained", type=bool, default=PRETRAINED_DEEPLAB, help="Use pretrained DeepLab weights.")
-    parser.add_argument("--output_dir", type=str, default=OUTPUT_DIR, help="Directory where the output will be stored (models and logs)")
+    parser.add_argument("--output_dir", type=str, default=OUTPUT_DIR, help="SubDirectory where the output will be stored (models and logs)")
+    parser.add_argument("--datetime", type=str, default=None, help="Directory where the output will be stored (models and logs)")
     parser.add_argument("--model_name", type=str, required=True, help="Name of the model. Used to create model and log directories inside the output directory.")
     parser.add_argument("--pretrained_weights", type=str, default=None, help="Path to the pretrained weights to be used.")
     parser.add_argument("--model", type=str, choices=models.model_list, default=MODEL, help="Which model architecture to use for training.")
@@ -96,7 +97,7 @@ def train_wasr(args):
     model = LitModel(model, args.num_classes, args)
 
     logs_path = os.path.join(args.output_dir, 'logs')
-    logger = pl_loggers.TensorBoardLogger(logs_path, args.model_name)
+    logger = pl_loggers.TensorBoardLogger(logs_path, args.model_name, version=args.datetime)
     logger.log_hyperparams(args)
 
     callbacks = []

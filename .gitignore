@@ -3,6 +3,7 @@
 
 # Project specific
 WaSR/output/
+WaSR/old_output/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
