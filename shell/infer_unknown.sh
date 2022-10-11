@@ -1,4 +1,4 @@
-python WaSR/predict_obs.py \
+python WaSR/predict_unknown.py \
 --dataset_config WaSR/configs/seaships_test.yaml \
 --model wasr_resnet101 \
 --wasr_weights WaSR/output/logs/my_wasr_no_imu/version_13/weights.pth \

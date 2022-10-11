@@ -2,7 +2,7 @@ timestamp=`date +%Y%m%d%H%M%S`
 dataset=wasr_all
 model=wasr_resnet101
 
-model_name=$model\_pretrained_$dataset\_crop
+model_name=$model\_pretrained_$dataset
 log_dir=WaSR/output/logs/$model_name/$timestamp
 mkdir -p $log_dir
 
