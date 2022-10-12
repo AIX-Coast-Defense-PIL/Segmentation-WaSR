@@ -44,10 +44,7 @@ def get_arguments():
 
 def predict(args):
     
-    if ('seaships' in args.dataset_config) or ('google' in args.dataset_config):
-        transform = get_image_resize()  
-    else:
-        transform = None
+    transform = get_image_resize() if 'seaships' in args.dataset_config else None
     
     dataset = MaSTr1325Dataset(args.dataset_config, transform=transform,
                                normalize_t=PytorchHubNormalization())
