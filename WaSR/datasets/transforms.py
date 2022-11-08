@@ -22,9 +22,9 @@ def get_augmentation_transform():
     return AlbumentationsTransform(transform)
 
 
-def get_image_resize(height=384, width=512):
+def get_image_resize():
     transform = A.Compose([
-        A.Resize(height, width),
+        A.Resize(384, 512),
     ])
 
     return AlbumentationsTransform(transform)

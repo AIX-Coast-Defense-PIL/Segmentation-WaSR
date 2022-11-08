@@ -54,7 +54,7 @@ def save_one_txt(predn, save_conf, shape, file):
             f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
 
-def process_batch(detections, labels, iouv):
+def process_batch(detections, labels, iouv, skip_cls_match=False):
     """
     Return correct predictions matrix. Both sets of boxes are in (x1, y1, x2, y2) format.
     Arguments:
@@ -65,7 +65,7 @@ def process_batch(detections, labels, iouv):
     """
     correct = np.zeros((detections.shape[0], iouv.shape[0])).astype(bool)
     iou = box_iou(labels[:, 1:], detections[:, :4])
-    correct_class = labels[:, 0:1] == detections[:, 5]
+    correct_class = labels[:, 0:1] == detections[:, 5] if not skip_cls_match else True
     for i in range(len(iouv)):
         x = torch.where((iou >= iouv[i]) & correct_class)  # IoU > threshold and classes match
         if x[0].shape[0]:
@@ -88,7 +88,7 @@ def get_arguments():
     ####### WaSR ######
     parser = argparse.ArgumentParser(description="WaSR Network MaSTr1325 Inference")
     parser.add_argument("--wasr_dataset", type=str, required=True, help="Path to the file containing the MaSTr1325 dataset mapping.")
-    parser.add_argument("--wasr_model", type=str, choices=models.model_list, default=MODEL, help="Model architecture.")
+    parser.add_argument("--model", type=str, choices=models.model_list, default=MODEL, help="Model architecture.")
     parser.add_argument("--wasr_weights", type=str, required=True, help="Path to the model weights or a model checkpoint.")
     parser.add_argument("--output_dir", type=str, required=True, help="Output directory.")
     parser.add_argument("--batch_size", type=int, default=BATCH_SIZE, help="Minibatch size (number of samples) used on each device.")
@@ -111,9 +111,39 @@ def get_arguments():
 
 
 def predict(args):
-    batch_size = args.batch_size
-    device = select_device(args.device, batch_size=batch_size)
+    device = select_device(args.device, batch_size=args.batch_size)
     
+    transform = None
+    if ('seaships' in args.wasr_dataset) or ('testdata' in args.wasr_dataset):
+        transform = get_image_resize()
+    # transform = None
+    
+    ####### WaSR ######
+    batch_size = args.batch_size
+    wasr_ds = MaSTr1325Dataset(args.wasr_dataset, transform=transform,
+                               normalize_t=PytorchHubNormalization(), sort=True)
+    wasr_dl = DataLoader(wasr_ds, batch_size=batch_size, num_workers=1)
+
+    # Prepare model
+    wasr_model = models.get_model(args.model, pretrained=False)
+    state_dict = load_weights(args.wasr_weights)
+    wasr_model.load_state_dict(state_dict)
+    predictor = Predictor(wasr_model, args.fp16)
+
+    ####### YOLO ######
+    # Load model
+    yolo_model = DetectMultiBackend(args.yolo_weights, device=device, data=args.yolo_dataset, fp16=args.fp16)
+    stride, pt, jit, engine = yolo_model.stride, yolo_model.pt, yolo_model.jit, yolo_model.engine
+    imgsz = check_img_size(args.imgsz, s=stride)  # check image size
+    half = yolo_model.fp16  # FP16 supported on limited backends with CUDA
+    if engine:
+        batch_size = yolo_model.batch_size
+    else:
+        device = yolo_model.device
+        if not (pt or jit):
+            batch_size = 1  # export.py models default to batch-size 1
+            LOGGER.info(f'Forcing --batch-size 1 square inference (1,3,{imgsz},{imgsz}) for non-PyTorch models')
+
     # Data
     yolo_dataset = check_dataset(args.yolo_dataset)  # check
         
@@ -124,66 +154,37 @@ def predict(args):
     if not os.path.exists(output_dir / 'labels'):
         os.makedirs(output_dir / 'labels')
 
-    
-    # Load model - yolo
-    yolo_model = DetectMultiBackend(args.yolo_weights, device=device, data=args.yolo_dataset, fp16=args.fp16)
-    stride, pt, jit, engine = yolo_model.stride, yolo_model.pt, yolo_model.jit, yolo_model.engine
-    imgsz = check_img_size(args.imgsz, s=stride)  # check image size
-    half = yolo_model.fp16  # FP16 supported on limited backends with CUDA
-    
-    if engine:
-        batch_size = yolo_model.batch_size
-    else:
-        device = yolo_model.device
-        if not (pt or jit):
-            batch_size = 1  # export.py models default to batch-size 1
-            LOGGER.info(f'Forcing --batch-size 1 square inference (1,3,{imgsz},{imgsz}) for non-PyTorch models')
-
     # Configure
     yolo_model.eval()
     cuda = device.type != 'cpu'
     nc = 1 if args.single_cls else int(yolo_dataset['nc'])  # number of classes
     print(nc)
-    # iouv = torch.linspace(0.5, 0.95, 10, device=device)  # iou vector for mAP@0.5:0.95
-    # niou = iouv.numel()
-    iouv = torch.tensor([0.5], device=device)  # iou vector for mAP@0.5:0.95
+    iouv = torch.linspace(0.5, 0.95, 10, device=device)  # iou vector for mAP@0.5:0.95
     niou = iouv.numel()
     
-    # Load model - wasr
-    wasr_model = models.get_model(args.wasr_model, pretrained=False)
-    state_dict = load_weights(args.wasr_weights)
-    wasr_model.load_state_dict(state_dict)
-    predictor = Predictor(wasr_model, args.fp16)
-    
-
-    # Dataloader - yolo
+    # Dataloader
     if pt and not args.single_cls:  # check --weights are trained on --data
         ncm = yolo_model.model.nc
         assert ncm == nc, f'{args.yolo_weights} ({ncm} classes) trained on different --data than what you passed ({nc} ' \
                             f'classes). Pass correct combination of --weights and --data that are trained together.'
     yolo_model.warmup(imgsz=(1 if pt else batch_size, 3, imgsz, imgsz))  # warmup
+    pad = 0.5
+    rect = pt  # square inference for benchmarks
     yolo_dl = create_dataloader(yolo_dataset['test'],
                                     imgsz,
                                     batch_size,
                                     stride,
                                     args.single_cls,
-                                    pad=0.5,
-                                    rect=pt, # square inference for benchmarks
+                                    pad=pad,
+                                    rect=rect,
                                     workers=args.workers,
                                     prefix=colorstr('test: '))[0]
-    
-    
-    # Dataloader - wasr
-    wasr_ds = MaSTr1325Dataset(args.wasr_dataset,
-                               normalize_t=PytorchHubNormalization(), yolo_resize=(batch_size, imgsz, stride, 0.5, pt))
-    wasr_dl = DataLoader(wasr_ds, batch_size=batch_size, num_workers=1)
-    
     
     seen = 0
     plots = True
     callbacks=Callbacks()
     confusion_matrix = ConfusionMatrix(nc=nc)
-    names = {0: 'Unknown'}
+    names = dict(enumerate(yolo_model.names if hasattr(yolo_model, 'names') else yolo_model.module.names))
     s = ('%20s' + '%11s' * 6) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
     dt, p, r, f1, mp, mr, map50, map = [0.0, 0.0, 0.0, 0.0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     loss = torch.zeros(3, device=device)
@@ -219,7 +220,6 @@ def predict(args):
         dt[2] += time_sync() - t3
 
         # Metrics
-        unk_preds, unk_labels = torch.tensor([], device=device), torch.tensor([], device=device)
         for si, (wasr_pred, yolo_pred) in enumerate(zip(wasr_preds, yolo_preds)):
             t4 = time_sync()
             ####### WaSR ######
@@ -243,13 +243,13 @@ def predict(args):
             # Predictions
             if args.single_cls:
                 yolo_pred[:, 5] = 0
-            yolo_predn = yolo_pred.clone()
-            scale_coords(im[si].shape[1:], yolo_predn[:, :4], shape, shapes[si][1])  # native-space pred
+            predn = yolo_pred.clone()
+            scale_coords(im[si].shape[1:], predn[:, :4], shape, shapes[si][1])  # native-space pred
 
             # Remove Detected Objects
             # Save one txt result
             gn = torch.tensor(shape)[[1, 0, 1, 0]]  # normalization gain whwh
-            for *xyxy, conf, cls in yolo_predn.tolist():
+            for *xyxy, conf, cls in predn.tolist():
                 xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
                 line = (cls, *xywh, conf) if args.save_conf else (cls, *xywh)  # label format
                 with open(output_dir / 'labels' / f'{path.stem}.txt', 'a') as f:
@@ -276,35 +276,31 @@ def predict(args):
                 obs_box = obs_bin[y-5:y+h+5, x-5:x+w+5]
                 surr_pix = cv2.dilate(obs_box, np.ones((5,5), np.uint8), iterations=1) - obs_box
                 sum_pix = surr_pix.sum()
-                surr_pix = np.multiply(wasr_pred[y-5:y+h+5, x-5:x+w+5, 0],surr_pix.astype(int))
+                surr_pix = np.multiply(wasr_pred[y-5:y+h+5, x-5:x+w+5,0],surr_pix.astype(int))
                 if surr_pix.sum() != 0:
                     if ((surr_pix==90).sum() / sum_pix > eps) or (w > width*0.95): 
                         ccl_cond = False
 
                 if ccl_cond:
-                    unk_predn.append([x, y, x+w, y+h, 1, 0]) # x y x y conf cls
+                    unk_predn.append([0, x, y, x+w, y+h, 1]) # cls x y x y conf
             unk_predn = torch.tensor(unk_predn, device=device)
-            
+                
             # Evaluate
             if len(unk_predn):
                 tbox = xywh2xyxy(yolo_lb[:, 1:5])  # target boxes
                 # scale_coords(im[si].shape[1:], tbox, shape, shapes[si][1])  # native-space labels
+                scale_coords(shape, tbox, im[si].shape[1:])  # native-space labels
                 labelsn = torch.cat((yolo_lb[:, 0:1], tbox), 1)  # native-space labels
-                correct = process_batch(unk_predn, labelsn, iouv)
+                # print(unk_predn)
+                # print('####')
+                # print('labelsn', labelsn)
+                correct = process_batch(unk_predn, labelsn, iouv, skip_cls_match=True)
                 if plots:
                     confusion_matrix.process_batch(unk_predn, labelsn)
-            # stats.append((correct, yolo_pred[:, 4], yolo_pred[:, 5], yolo_lb[:, 0]))  # (correct, conf, pcls, tcls)
-            stats.append((correct, torch.ones(len(correct), device=device), 
-                          torch.zeros(len(correct), device=device), yolo_lb[:, 0]))  # (correct, conf, pcls, tcls)
+            stats.append((correct, yolo_pred[:, 4], yolo_pred[:, 5], yolo_lb[:, 0]))  # (correct, conf, pcls, tcls)
             dt[3] += time_sync() - t4
 
-            callbacks.run('on_val_image_end', yolo_pred, yolo_predn, path, names, im[si])
-            unk_preds = torch.cat((unk_preds, unk_predn), 0)
-            if len(labelsn):
-                labelsn = torch.cat((torch.zeros((len(labelsn),1), device=device), labelsn), 1)
-                labelsn[:, 2:] = xyxy2xywh(labelsn[:, 2:])
-                unk_labels = torch.cat((unk_labels, labelsn), 0)
-            else: unk_labels = labelsn
+            callbacks.run('on_val_image_end', yolo_pred, predn, path, names, im[si])
 
             
             ####### WaSR ######
@@ -312,15 +308,12 @@ def predict(args):
             out_file = output_dir / 'images' / wasr_lb['mask_filename'][si]
 
             mask_img.save(out_file)
-
+    
         ####### YOLO ######
         # Plot images
-        if plots and batch_i < 10:
-            print('label')
-            print(unk_labels)
-            plot_images(im, unk_labels, paths, output_dir / f'val_batch{batch_i}_labels.jpg', names)  # labels
-            print('pred')
-            plot_images(im, output_to_target([unk_preds]), paths, output_dir / f'val_batch{batch_i}_pred.jpg', names, plot_conf=False)  # pred
+        if plots and batch_i < 3:
+            plot_images(im, targets, paths, output_dir / f'val_batch{batch_i}_labels.jpg', names)  # labels
+            plot_images(im, output_to_target(yolo_preds), paths, output_dir / f'val_batch{batch_i}_pred.jpg', names)  # pred
 
         callbacks.run('on_val_batch_end')
 
@@ -340,6 +333,7 @@ def predict(args):
         tp, fp, p, r, f1, ap, ap_class = ap_per_class(*stats, plot=plots, save_dir=output_dir, names=names)
         ap50, ap = ap[:, 0], ap.mean(1)  # AP@0.5, AP@0.5:0.95
         mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
+        print(mr)
     nt = np.bincount(stats[3].astype(int), minlength=nc)  # number of targets per class
 
     # Print results
