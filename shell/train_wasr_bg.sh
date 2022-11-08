@@ -1,5 +1,5 @@
 timestamp=`date +%Y%m%d%H%M%S`
-dataset=mastr1325
+dataset=mastr1478
 model=wasr_resnet101
 
 model_name=$model\_pretrained_$dataset
@@ -14,6 +14,6 @@ python WaSR/train.py \
 --pretrained True \
 --validation \
 --batch_size 4 \
---epochs 50 \
+--epochs 100 \
 --output_dir WaSR/output \
 --datetime $timestamp &>> $log_dir/$model_name\_$timestamp.log
