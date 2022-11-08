@@ -1,0 +1,5 @@
+image_dir: ../../datasets/mastr153/images
+image_hist_dir: ../../datasets/mastr153/images_hist
+image_hist_len: 5
+image_list: all_list_hist.txt
+mask_dir: ../../datasets/mastr153/masks

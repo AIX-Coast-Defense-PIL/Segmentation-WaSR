@@ -44,10 +44,7 @@ def get_arguments():
 
 def predict(args):
     
-    if ('seaships' in args.dataset_config) or ('google' in args.dataset_config):
-        transform = get_image_resize()  
-    else:
-        transform = None
+    transform = get_image_resize() if 'seaships' in args.dataset_config else None
     
     dataset = MaSTr1325Dataset(args.dataset_config, transform=transform,
                                normalize_t=PytorchHubNormalization())
@@ -60,8 +57,8 @@ def predict(args):
     predictor = Predictor(model, args.fp16)
 
     output_dir = Path(args.output_dir)
-    if not output_dir.exists():
-        output_dir.mkdir(parents=True)
+    if not os.path.exists(output_dir / 'images'):
+        os.makedirs(output_dir / 'images')
 
     for features, labels in tqdm(iter(dl), total=len(dl)):
         pred_masks = predictor.predict_batch(features)
@@ -70,7 +67,7 @@ def predict(args):
             pred_mask = SEGMENTATION_COLORS[pred_mask]
             mask_img = Image.fromarray(pred_mask)
 
-            out_file = output_dir / labels['mask_filename'][i]
+            out_file = output_dir / 'images' / labels['mask_filename'][i]
 
             mask_img.save(out_file)
     

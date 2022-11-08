@@ -1,13 +1,19 @@
-model_name="my_wasr_no_imu"
 timestamp=`date +%Y%m%d%H%M%S`
+dataset=mastr1478
+model=wasr_resnet101
+
+model_name=$model\_pretrained_$dataset
+log_dir=WaSR/output/logs/$model_name/$timestamp
+mkdir -p $log_dir
 
 python WaSR/train.py \
---train_config WaSR/configs/mastr1325_train.yaml \
---val_config WaSR/configs/mastr1325_val.yaml \
+--train_config WaSR/configs/$dataset\_train.yaml \
+--val_config WaSR/configs/$dataset\_val.yaml \
+--model $model \
 --model_name $model_name \
---model wasr_resnet101 \
---pretrained False \
+--pretrained True \
 --validation \
 --batch_size 4 \
---epochs 1 \
---output_dir WaSR/output &>> WaSR/output/runs/$model_name\_"$timestamp".log
+--epochs 100 \
+--output_dir WaSR/output \
+--datetime $timestamp &>> $log_dir/$model_name\_$timestamp.log
