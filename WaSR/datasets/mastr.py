@@ -7,6 +7,8 @@ import torch
 import torchvision.transforms.functional as TF
 import yaml
 
+from datasets.transforms import get_image_resize
+
 def read_mask(path):
     """Reads class segmentation mask from an image file."""
     mask = np.array(Image.open(path))
@@ -39,7 +41,7 @@ class MaSTr1325Dataset(torch.utils.data.Dataset):
         normalize_t (optional): Transform that normalizes the input image
         include_original (optional): Include original (non-normalized) version of the image in the features
     """
-    def __init__(self, dataset_file, transform=None, normalize_t=None, include_original=False, sort=False):
+    def __init__(self, dataset_file, transform=None, normalize_t=None, include_original=False, yolo_resize=None):
         dataset_file = Path(dataset_file)
         self.dataset_dir = dataset_file.parent
         with dataset_file.open('r') as file:
@@ -57,12 +59,49 @@ class MaSTr1325Dataset(torch.utils.data.Dataset):
             else:
                 self.images = os.listdir(self.image_dir)
             
-            if sort:
+            # Use the same method as the resizing method of yolo's dataloader(LoadImagesAndLabels).
+            if yolo_resize: 
                 self.images.sort()
+                batch_size, self.img_size, stride, pad, self.rect = yolo_resize
+                
+                # Read cache
+                cache_path = (self.image_dir / Path('../labels.cache')).resolve()
+                cache = np.load(cache_path, allow_pickle=True).item()
+                nf, nm, ne, nc, n = cache.pop('results')  # found, missing, empty, corrupt, total
+                [cache.pop(k) for k in ('hash', 'version', 'msgs')]  # remove items
+                labels, shapes, _ = zip(*cache.values())
+                labels = list(labels)
+                shapes = np.array(shapes, dtype=np.float64)
+                bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
+                nb = bi[-1] + 1  # number of batches
+                self.batch = bi  # batch index of image
+                
+                # Rectangular Training
+                if self.rect:
+                    # Sort by aspect ratio
+                    s = shapes  # wh
+                    ar = s[:, 1] / s[:, 0]  # aspect ratio
+                    irect = ar.argsort()
+                    self.images = [self.images[i] for i in irect]
+                    shapes = s[irect]  # wh
+                    ar = ar[irect]
+                    
+                    # Set training image shapes
+                    shapes = [[1, 1]] * nb
+                    for i in range(nb):
+                        ari = ar[bi == i]
+                        mini, maxi = ari.min(), ari.max()
+                        if maxi < 1:
+                            shapes[i] = [maxi, 1]
+                        elif mini > 1:
+                            shapes[i] = [1, 1 / mini]
+
+                    self.batch_shapes = np.ceil(np.array(shapes) * self.img_size / stride + pad).astype(np.int) * stride
 
         self.transform = transform
         self.normalize_t = normalize_t
         self.include_original = include_original
+        self.yolo_resize = yolo_resize
 
     def __len__(self):
         return len(self.images)
@@ -93,6 +132,11 @@ class MaSTr1325Dataset(torch.utils.data.Dataset):
         # Transform images and masks if transform is provided
         if self.transform is not None:
             data = self.transform(data)
+            img = data['image']
+
+        if self.yolo_resize is not None:
+            shape = self.batch_shapes[self.batch[idx]] if self.rect else self.img_size  # final letterboxed shape
+            data = get_image_resize(*shape)(data)
             img = data['image']
 
         if self.normalize_t is not None:
