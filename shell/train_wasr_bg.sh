@@ -1,5 +1,5 @@
 timestamp=`date +%Y%m%d%H%M%S`
-dataset=mastr1478
+dataset=wasr_all_v2
 model=wasr_resnet101
 
 model_name=$model\_pretrained_$dataset
