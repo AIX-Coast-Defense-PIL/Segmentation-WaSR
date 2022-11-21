@@ -1,4 +1,3 @@
 image_dir: ../../datasets/WaSR_all/images
 mask_dir: ../../datasets/WaSR_all/masks
-imu_dir: ../../datasets/WaSR_all/imus
 image_list: test_wasr_all.txt
