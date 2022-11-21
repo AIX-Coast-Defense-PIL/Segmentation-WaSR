@@ -6,8 +6,13 @@
 [[`BibTeX`](#cite)] 
 
 ```bash
-# background
+## train (background)
 . shell/train_wasr_bg.sh &
+
+## inference
+. shell/infer_wasr.sh 
+# 참고: mode==pred -> results: images (seaships와 같이 정성적 평가만 가능할 때)
+# 참고: mode==eval -> results: images, accuracy, iou (aihub와 같이 정량적 평가도 가능할 때)
 ```
 
 <br/>
