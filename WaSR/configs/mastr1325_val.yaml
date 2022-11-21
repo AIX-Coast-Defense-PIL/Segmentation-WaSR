@@ -1,4 +1,3 @@
 image_dir: ../../datasets/MaSTr1325/images
 mask_dir: ../../datasets/MaSTr1325/masks
-imu_dir: ../../datasets/MaSTr1325/imus
 image_list: val_mastr_custom.txt
