@@ -11,14 +11,14 @@ import wasr.models as models
 from wasr.train import LitModel
 from wasr.utils import ModelExporter, load_weights
 from datasets.mastr import MaSTr1325Dataset
-from datasets.transforms import get_augmentation_transform, PytorchHubNormalization
+from datasets.transforms import get_augmentation_transform, PytorchHubNormalization, PytorchHubNormalizationAug
 
 
 DEVICE_BATCH_SIZE = 3
 NUM_CLASSES = 3
 PATIENCE = None
 LOG_STEPS = 20
-NUM_WORKERS = 1
+NUM_WORKERS = 4
 NUM_GPUS = -1 # All visible GPUs
 RANDOM_SEED = None
 OUTPUT_DIR = 'output'
@@ -70,14 +70,14 @@ def train_wasr(args):
     args.random_seed = pl.seed_everything(args.random_seed)
 
     normalize_t = PytorchHubNormalization()
-
+    randaug_t = PytorchHubNormalizationAug()
     transform = None
     # Data augmentation
     if not args.no_augmentation:
         transform = get_augmentation_transform()
 
     train_ds = MaSTr1325Dataset(args.train_config, transform=transform,
-                                normalize_t=normalize_t)
+                                normalize_t=randaug_t)
 
     train_dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
                             num_workers=args.workers, drop_last=True)

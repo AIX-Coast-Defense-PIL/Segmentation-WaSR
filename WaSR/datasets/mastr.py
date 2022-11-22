@@ -93,8 +93,8 @@ class MaSTr1325Dataset(torch.utils.data.Dataset):
         # Transform images and masks if transform is provided
         if self.transform is not None:
             data = self.transform(data)
-            img = data['image']
-
+            img = data['image'] # img (384, 512, 3)
+        #print("img", img.shape)
         if self.normalize_t is not None:
             img = self.normalize_t(img)
         else:

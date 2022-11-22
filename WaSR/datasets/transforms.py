@@ -1,6 +1,9 @@
 import albumentations as A
 import torchvision.transforms as T
 import numpy as np
+from .autoaugment import *
+
+extra = RandAugment()
 
 def get_augmentation_transform():
     color_transform = A.Compose([
@@ -16,10 +19,30 @@ def get_augmentation_transform():
         A.HorizontalFlip(),
         A.ShiftScaleRotate(scale_limit=[0,0.3], rotate_limit=15, border_mode=0, p=0.7),
         color_transform,
-        noise_transform
+        noise_transform,
+        #extra
     ])
 
     return AlbumentationsTransform(transform)
+
+# def get_augmentation_transform():
+#     color_transform = A.Compose([
+#         A.ColorJitter(p=0.7, hue=0.05),
+#         A.RandomGamma(p=1, gamma_limit=(70,120))], p=0.5)
+#
+#     noise_transform = A.Compose([
+#         A.GaussNoise(p=0.5),
+#         A.ISONoise(p=0.5)], p=0.3)
+#
+#     transform = A.Compose([
+#         A.RandomResizedCrop(height=384, width=512, scale=(0.7,1.0), ratio=(1.2,1.5), p=0.5),
+#         A.HorizontalFlip(),
+#         A.ShiftScaleRotate(scale_limit=[0,0.3], rotate_limit=15, border_mode=0, p=0.7),
+#         color_transform,
+#         noise_transform
+#     ])
+#
+#     return AlbumentationsTransform(transform)
 
 
 def get_image_resize(height=384, width=512):
@@ -52,6 +75,22 @@ class AlbumentationsTransform(object):
         return output
 
 
+def PytorchHubNormalizationAug():
+    """Transform that normalizes the image to pytorch hub models (DeepLab, ResNet,...) expected range.
+    See: https://pytorch.org/hub/pytorch_vision_deeplabv3_resnet101/"""
+
+    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([0.229, 0.224, 0.225])
+
+    transform = T.Compose([
+        T.ToPILImage(),
+        extra,
+        T.ToTensor(), # CHW order, divide by 255
+        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+
+    return transform
+
 def PytorchHubNormalization():
     """Transform that normalizes the image to pytorch hub models (DeepLab, ResNet,...) expected range.
     See: https://pytorch.org/hub/pytorch_vision_deeplabv3_resnet101/"""
@@ -61,7 +100,7 @@ def PytorchHubNormalization():
 
     transform = T.Compose([
         T.ToTensor(), # CHW order, divide by 255
-        T.Normalize(mean, std)
+        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
     return transform
