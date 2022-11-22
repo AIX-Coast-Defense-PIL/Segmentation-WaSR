@@ -462,7 +462,7 @@ class RandAugment:
     def get_trans_list(cls):
         trans_list = [
             'Invert', 'Sharpness', 'AutoContrast', 'Posterize',
-            'ShearX', 'TranslateX', 'TranslateY', 'ShearY', 'Rotate',
+            #'ShearX', 'TranslateX', 'TranslateY', 'ShearY', 'Rotate',
             'Equalize', 'Contrast', 'Color', 'Solarize', 'Brightness'] # Cutout delete.
         return trans_list
 
