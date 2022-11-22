@@ -12,7 +12,7 @@ def get_augmentation_transform():
         A.ISONoise(p=0.5)], p=0.3)
 
     transform = A.Compose([
-        # A.RandomResizedCrop(height=384, width=512, scale=(0.7,1.0), p=0.5),
+        A.RandomResizedCrop(height=384, width=512, scale=(0.9,1.0), p=0.75),
         A.HorizontalFlip(),
         A.ShiftScaleRotate(scale_limit=[0,0.3], rotate_limit=15, border_mode=0, p=0.7),
         color_transform,
