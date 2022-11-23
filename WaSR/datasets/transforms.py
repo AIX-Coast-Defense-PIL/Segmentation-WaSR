@@ -1,6 +1,8 @@
 import albumentations as A
 import torchvision.transforms as T
 import numpy as np
+from .autoaugment import *
+
 
 def get_augmentation_transform():
     color_transform = A.Compose([
@@ -50,6 +52,23 @@ class AlbumentationsTransform(object):
                 output[feat] = x[feat]
 
         return output
+
+
+def PytorchHubNormalizationAug():
+    """Transform that normalizes the image to pytorch hub models (DeepLab, ResNet,...) expected range.
+    See: https://pytorch.org/hub/pytorch_vision_deeplabv3_resnet101/"""
+
+    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([0.229, 0.224, 0.225])
+    
+    transform = T.Compose([
+        T.ToPILImage(),
+        RandAugment(),
+        T.ToTensor(), # CHW order, divide by 255
+        T.Normalize(mean, std)
+    ])
+
+    return transform
 
 
 def PytorchHubNormalization():
