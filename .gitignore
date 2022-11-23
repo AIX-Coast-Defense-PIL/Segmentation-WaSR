@@ -4,6 +4,8 @@
 # Project specific
 WaSR/output/
 WaSR/old_output/
+WaSR/output-kyle/
+WaSR/output-sg-aug-kyle/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
