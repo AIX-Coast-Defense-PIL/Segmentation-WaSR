@@ -1,16 +1,18 @@
 import argparse
 from pathlib import Path
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 import torch
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
+import cv2
+import torchvision.transforms as T
 
 from datasets.mastr import MaSTr1325Dataset
 from datasets.transforms import PytorchHubNormalization
 from wasr.inference import Predictor
 import wasr.models as models
-from wasr.utils import load_weights, get_box_coord
+from wasr.utils import load_weights
 from datasets.transforms import get_image_resize
 
 
@@ -28,6 +30,8 @@ from yolov5.utils.general import (LOGGER, check_file, check_img_size, check_imsh
                             non_max_suppression, scale_coords, xyxy2xywh)
 from yolov5.utils.torch_utils import select_device, time_sync
 
+import warnings
+warnings.filterwarnings(action='ignore')
 
 
 # Colors corresponding to each segmentation class
@@ -87,10 +91,8 @@ def predict(args):
     predictor = Predictor(wasr_model, args.fp16)
 
     output_dir = Path(args.output_dir)
-    if not os.path.exists(output_dir / 'images'):
-        os.makedirs(output_dir / 'images')
-    if not os.path.exists(output_dir / 'labels'):
-        os.makedirs(output_dir / 'labels')
+    for dname in ['yolo_labels', 'seg_images', 'unk_images']:
+        os.makedirs(output_dir/dname, exist_ok=True)
 
     ###### yolo ######
     dataset_file = Path(args.dataset_config)
@@ -99,10 +101,7 @@ def predict(args):
 
     source = str(source)
     is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
-    is_url = source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://'))
-    webcam = source.isnumeric() or source.endswith('.txt') or (is_url and not is_file)
-    if is_url and is_file:
-        source = check_file(source)  # download
+    if is_file: source = check_file(source)  # download
 
     # Load model
     device = select_device(args.device)
@@ -112,23 +111,20 @@ def predict(args):
     imgsz = check_img_size(args.imgsz, s=stride)  # check image size
 
     # Dataloader
-    if webcam:
-        view_img = check_imshow()
-        cudnn.benchmark = True  # set True to speed up constant image size inference
-        yolo_ds = LoadStreams(source, img_size=imgsz, stride=stride, auto=pt)
-        bs = len(yolo_ds)  # batch_size
-    else:
-        yolo_ds = LoadImages(source, img_size=imgsz, stride=stride, auto=pt)
-        bs = args.batch_size  # batch_size
+    yolo_dl = LoadImages(source, img_size=imgsz, stride=stride, auto=pt)
+    bs = args.batch_size  # batch_size
 
 
     # Run inference
     yolo_model.warmup(imgsz=(1 if pt else bs, 3, *imgsz))  # warmup
     seen, dt = 0, [0.0, 0.0, 0.0]
-    for [features, labels], [path, im, im0s, _, s]  in tqdm(zip(iter(wasr_dl), yolo_ds), total=len(wasr_dl)):
+    for [features, labels], [path, im, im0s, _, s]  in tqdm(zip(iter(wasr_dl), yolo_dl), total=len(wasr_dl)):
+        # features['image'] : (1, 3, 384, 512)
+        # im : (3, 288, 512)
+        # im0s : (1080, 1920, 3)
         
         ###### wasr ######
-        pred_masks = predictor.predict_batch(features)
+        wasr_preds = predictor.predict_batch(features) # (1, 384, 512)
 
         ###### yolo ######
         t1 = time_sync()
@@ -136,76 +132,105 @@ def predict(args):
         im = im.half() if yolo_model.fp16 else im.float()  # uint8 to fp16/32
         im /= 255  # 0 - 255 to 0.0 - 1.0
         if len(im.shape) == 3:
-            im = im[None]  # expand for batch dim
+            im = im[None]  # expand for batch dim # (1, 3, 288, 512)
         t2 = time_sync()
         dt[0] += t2 - t1
+        transform = T.ToPILImage()
+        box_img = transform(im[0,:,:,:])
+        box_draw = ImageDraw.Draw(box_img)
 
         # Inference
-        pred = yolo_model(im, augment=args.augment)
+        yolo_preds = yolo_model(im, augment=args.augment)
         t3 = time_sync()
         dt[1] += t3 - t2
 
         # NMS
-        pred = non_max_suppression(pred, args.conf_thres, args.iou_thres, args.classes, args.agnostic_nms, max_det=args.max_det)
+        yolo_preds = non_max_suppression(yolo_preds, args.conf_thres, args.iou_thres, args.classes, args.agnostic_nms, max_det=args.max_det)
         dt[2] += time_sync() - t3
+        # [(1,6)]
 
         # Second-stage classifier (optional)
         # pred = utils.general.apply_classifier(pred, classifier_model, im, im0s)
 
         # Process predictions
-        for i, (det, pred_mask) in enumerate(zip(pred, pred_masks)):  # per image
+        for i, (wasr_pred, yolo_pred) in enumerate(zip(wasr_preds, yolo_preds)):  # per image
             ###### wasr ######
-            pred_mask = SEGMENTATION_COLORS[pred_mask]
+            wasr_pred = SEGMENTATION_COLORS[wasr_pred]
+            obs_bin = np.uint8(np.where(wasr_pred[:,:,0]==247,1,0)) # binary (obstacle=1, other(sky,sea)=0)
             
             ###### yolo ######
             seen += 1
-            if webcam:  # batch_size >= 1
-                p, im0, frame = path[i], im0s[i].copy(), yolo_ds.count
-                s += f'{i}: '
-            else:
-                p, im0, frame = path, im0s.copy(), getattr(yolo_ds, 'frame', 0)
+            p, frame = path, getattr(yolo_dl, 'frame', 0)
 
             p = Path(p)  # to Path
-            txt_path = str(output_dir / 'labels' / p.stem) + ('' if yolo_ds.mode == 'image' else f'_{frame}')  # im.txt
+            txt_path = str(output_dir / 'yolo_labels' / p.stem) + ('' if yolo_dl.mode == 'image' else f'_{frame}')  # im.txt
             s += '%gx%g ' % im.shape[2:]  # print string
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-            if len(det):
+            gn = torch.tensor(obs_bin.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+            gn2 = torch.tensor(im.shape)[[3, 2, 3, 2]]
+            if len(yolo_pred):
                 # Rescale boxes from img_size to im0 size
-                det[:, :4] = scale_coords(im.shape[2:], det[:, :4], im0.shape).round()
+                yolo_pred[:, :4] = scale_coords(im.shape[2:], yolo_pred[:, :4], obs_bin.shape).round()
 
                 # Print results
-                for c in det[:, -1].unique():
-                    n = (det[:, -1] == c).sum()  # detections per class
+                for c in yolo_pred[:, -1].unique():
+                    n = (yolo_pred[:, -1] == c).sum()  # detections per class
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
                 # Write results
-                for *xyxy, conf, cls in reversed(det):
+                for *xyxy, conf, cls in reversed(yolo_pred):
                     xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
                     line = (cls, *xywh, conf) if args.save_conf else (cls, *xywh)  # label format
                     with open(f'{txt_path}.txt', 'a') as f:
                         f.write(('%g ' * len(line)).rstrip() % line + '\n')
         
                     ###### remove ships ######
-                    box = get_box_coord(pred_mask.shape, *xywh)
-                    pred_mask[box[1]:box[3], box[0]:box[2],:] = [41, 167, 224]
+                    yolo_box = [int(y) for y in yolo_pred[0]]
+                    obs_bin[yolo_box[1]:yolo_box[3], yolo_box[0]:yolo_box[2]] = 0
+
+                    
+                ###### Connected Component Labeling ######
+                ccl_num_labels, ccl_labels, ccl_stats, ccl_centroids = cv2.connectedComponentsWithStats(obs_bin)
+
+                ###### Ground Removal ######
+                unk_predn = [] # unknown prediction
+                for x,y,w,h,a in ccl_stats:
+                    ccl_cond = True
+                    
+                    if a < (obs_bin.shape[1]*0.008)**2:
+                        ccl_cond = False
+                
+                    eps = 0.3
+                    if x < 5: x += 5
+                    if y < 5: y += 5
+                    obs_box = obs_bin[y-5:y+h+5, x-5:x+w+5]
+                    surr_pix = cv2.dilate(obs_box, np.ones((5,5), np.uint8), iterations=1) - obs_box
+                    sum_pix = surr_pix.sum()
+                    surr_pix = np.multiply(wasr_pred[y-5:y+h+5, x-5:x+w+5, 0],surr_pix.astype(int))
+                    if surr_pix.sum() != 0:
+                        if ((surr_pix==90).sum() / sum_pix > eps) or (w > obs_bin.shape[1]*0.95): 
+                            ccl_cond = False
+
+                    if ccl_cond:
+                        unk_predn.append([x, y, x+w, y+h, 1, 0]) # x y x y conf cls
+                        unk_box = (torch.tensor([x, y, x+w, y+h]).view(1,4) / gn * gn2).view(-1).tolist()
+                        box_draw.rectangle(unk_box, outline=(255,0,0), width = 2)
+                unk_predn = torch.tensor(unk_predn, device=device)
             
-            mask_img = Image.fromarray(pred_mask)
+            mask_img = Image.fromarray(wasr_pred)
+            mask_img.save(output_dir / 'seg_images' / labels['mask_filename'][i])
+            box_img.save(output_dir / 'unk_images' / labels['mask_filename'][i])
 
-            out_file = output_dir / 'images' / labels['mask_filename'][i]
-            mask_img.save(out_file)
-
-        
         # Print time (inference-only)
-        LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
-        print('---')
+        # LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
+        # print('---')
 
     ###### wasr ######
+    # save parameters
     with open(output_dir / 'info.txt', 'w') as f:
         for key, value in vars(args).items(): 
             f.write('%s:%s\n' % (key, value))
         
         f.write('the number of data : %d\n\n' % (len(wasr_ds)))
-    
     
     ###### yolo ######
     # Print results
