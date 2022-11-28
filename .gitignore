@@ -4,6 +4,9 @@
 # Project specific
 WaSR/output/
 WaSR/old_output/
+yolov5/runs/
+yolov4/inference/
+ScaledYOLOv4/runs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
