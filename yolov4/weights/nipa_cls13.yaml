@@ -1,0 +1,11 @@
+# train and val datasets (image directory or *.txt file with image paths)
+train: ./train.txt
+val: ./valid.txt
+test: ./valid.txt  # 20k images for submission to https://competitions.codalab.org/competitions/20794
+
+# number of classes
+nc: 10
+
+# class names
+names: ['boat', 'warship', 'submarine','rubberboat','person','airplane','helicopter','drone','car','buoy']
+

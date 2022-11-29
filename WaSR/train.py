@@ -11,7 +11,7 @@ import wasr.models as models
 from wasr.train import LitModel
 from wasr.utils import ModelExporter, load_weights
 from datasets.mastr import MaSTr1325Dataset
-from datasets.transforms import get_augmentation_transform, PytorchHubNormalization
+from datasets.transforms import get_augmentation_transform, PytorchHubNormalization, PytorchHubNormalizationAug
 
 
 DEVICE_BATCH_SIZE = 3
@@ -70,7 +70,8 @@ def train_wasr(args):
     args.random_seed = pl.seed_everything(args.random_seed)
 
     normalize_t = PytorchHubNormalization()
-
+    # randaug_t = PytorchHubNormalizationAug()
+    
     transform = None
     # Data augmentation
     if not args.no_augmentation:

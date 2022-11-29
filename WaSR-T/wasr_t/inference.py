@@ -9,10 +9,11 @@ import torchvision.transforms.functional as TF
 import pytorch_lightning as pl
 
 from .utils import tensor_map
+from .metrics import PixelAccuracy, ClassIoU
 
 
 class Predictor():
-    def __init__(self, model, half_precision):
+    def __init__(self, model, half_precision, eval_mode=False):
         self.model = model
         self.half_precision = half_precision
 
@@ -22,6 +23,14 @@ class Predictor():
         if self.half_precision:
             self.model = self.model.half()
         self.model = self.model.eval().to(self.device)
+        
+        if eval_mode:
+            # Metrics
+            num_classes = 3
+            self.accuracy = PixelAccuracy(num_classes)
+            self.iou_0 = ClassIoU(0, num_classes)
+            self.iou_1 = ClassIoU(1, num_classes)
+            self.iou_2 = ClassIoU(2, num_classes)
 
     def predict_batch(self, batch):
 
@@ -42,6 +51,39 @@ class Predictor():
         out = out.numpy()
 
         return out
+    
+    def evaluate_batch(self, features, labels):
+
+        map_fn = lambda t: t.to(self.device)
+        features = tensor_map(features, map_fn)
+
+        with torch.no_grad():
+            if self.half_precision:
+                with torch.cuda.amp.autocast():
+                    res = self.model(features)
+            else:
+                res = self.model(features)
+
+        out = res['out'].cpu().detach()
+        
+        # Metrics
+        labels_size = (labels['segmentation'].size(2), labels['segmentation'].size(3))
+        logits = TF.resize(out, labels_size, interpolation=Image.BILINEAR)
+        preds = logits.argmax(1)
+        
+        # Create hard labels from soft
+        labels_hard = labels['segmentation'].argmax(1)
+        ignore_mask = labels['segmentation'].sum(1) < 0.9
+        labels_hard = labels_hard * ~ignore_mask + 4 * ignore_mask
+
+        self.accuracy(preds, labels_hard)
+        self.iou_0(preds, labels_hard)
+        self.iou_1(preds, labels_hard)
+        self.iou_2(preds, labels_hard)
+
+        return {'accuracy':self.accuracy.compute(), 'iou_obstacle':self.iou_0.compute(), 
+                'iou_water':self.iou_1.compute(), 'iou_sky':self.iou_2.compute()}
+
 
 class LitPredictor(pl.LightningModule):
     """Predicts masks and exports them. Supports multi-gpu inference."""
