@@ -18,6 +18,7 @@ class NoIMUDecoder(nn.Module):
 
         self.ffm = FeatureFusionModule(256, 2048, 1024)
         self.aspp = ASPPv2(1024, [6, 12, 18, 24], num_classes)
+        # self.dropout = nn.Dropout(p=0.25)
 
     def forward(self, x):
         features = x
@@ -27,6 +28,7 @@ class NoIMUDecoder(nn.Module):
         arm_combined = arm1 + arm2
 
         x = self.ffm(features['skip1'], arm_combined)
+        # x = self.dropout(x)
 
         output = self.aspp(x)
 
