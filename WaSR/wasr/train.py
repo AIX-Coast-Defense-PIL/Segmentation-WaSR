@@ -5,7 +5,8 @@ from torch.optim.lr_scheduler import LambdaLR
 import torchvision.transforms.functional as TF
 import pytorch_lightning as pl
 
-from .loss import focal_loss, water_obstacle_separation_loss
+from .loss import focal_loss, water_obstacle_separation_loss, contr_water_obstacle_separation_loss, \
+                    contr_obstacle_water_separation_loss, contr_water_obstacle_combined_separation_loss
 from .metrics import PixelAccuracy, ClassIoU
 
 NUM_EPOCHS = 50
@@ -14,6 +15,7 @@ MOMENTUM = 0.9
 WEIGHT_DECAY = 1e-6
 LR_DECAY_POW = 0.9
 FOCAL_LOSS_SCALE = 'labels'
+SEPAR_LOSS = 'wsl'
 SL_LAMBDA = 0.01
 
 class LitModel(pl.LightningModule):
@@ -35,7 +37,9 @@ class LitModel(pl.LightningModule):
                             help="Regularisation parameter for L2-loss.")
         parser.add_argument("--focal_loss_scale", type=str, default=FOCAL_LOSS_SCALE, choices=['logits', 'labels'],
                             help="Which scale to use for focal loss computation (logits or labels).")
-        parser.add_argument("--no_separation_loss", action='store_true', help="Disable separation loss.")
+        parser.add_argument("--separation_loss", type=str, default=SEPAR_LOSS, choices=['wsl', 'cwsl', 'cosl', 'cwosl', 'None'],
+                            help="Select seperation loss (wsl or cwsl or None)")
+        # parser.add_argument("--no_separation_loss", action='store_true', help="Disable separation loss.")
         parser.add_argument("--separation_loss_lambda", default=SL_LAMBDA, type=float,
                             help="The separation loss lambda (weight).")
 
@@ -53,7 +57,7 @@ class LitModel(pl.LightningModule):
         self.weight_decay = args.weight_decay
         self.lr_decay_pow = args.lr_decay_pow
         self.focal_loss_scale = args.focal_loss_scale
-        self.separation_loss = not args.no_separation_loss
+        self.separation_loss = args.separation_loss
         self.separation_loss_lambda = args.separation_loss_lambda
 
         # Metrics
@@ -73,8 +77,14 @@ class LitModel(pl.LightningModule):
 
         fl = focal_loss(out['out'], labels['segmentation'], target_scale=self.focal_loss_scale)
 
-        if self.separation_loss:
+        if self.separation_loss == 'wsl':
             separation_loss = water_obstacle_separation_loss(out['aux'], labels['segmentation'])
+        elif self.separation_loss == 'cwsl':
+            separation_loss = contr_water_obstacle_separation_loss(out['aux'], labels['segmentation'])
+        elif self.separation_loss == 'cosl':
+            separation_loss = contr_obstacle_water_separation_loss(out['aux'], labels['segmentation'])
+        elif self.separation_loss == 'cwosl':
+            separation_loss = contr_water_obstacle_combined_separation_loss(out['aux'], labels['segmentation'])
         else:
             separation_loss = torch.tensor(0.0)
 
