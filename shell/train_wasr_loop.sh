@@ -1,15 +1,15 @@
-timestamp=`date +%Y%m%d%H%M%S`
 dataset=mastr1478
 model=wasr_resnet101
-
 model_name=$model\_pretrained_$dataset
-log_dir=WaSR/output/logs/$model_name/$timestamp
-mkdir -p $log_dir
 
 separation_loss=("cwsl" "cosl" "cwosl")
 len_separation_loss=${#separation_loss[@]}
 
 for ((loss=0;loss<$len_separation_loss;loss++)) do
+    timestamp=`date +%Y%m%d%H%M%S`
+    log_dir=WaSR/output/logs/$model_name/$timestamp
+    mkdir -p $log_dir
+
     CUDA_VISIBLE_DEVICES=1 python WaSR/train.py \
     --train_config WaSR/configs/$dataset\_train.yaml \
     --val_config WaSR/configs/$dataset\_val.yaml \
