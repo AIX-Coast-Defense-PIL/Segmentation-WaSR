@@ -90,7 +90,7 @@ def contr_water_obstacle_separation_loss(features, gt_mask):
         gt_mask (torch.tensor): Ground truth tensor
         clipping_value (float): Clip loss at clipping_value * sigma
     """
-    epsilon_watercost = 0.01
+    epsilon = 0.01
     min_samples = 5
 
     # Resize gt mask to match the extracted features shape (x,y)
@@ -101,7 +101,6 @@ def contr_water_obstacle_separation_loss(features, gt_mask):
     # The masks should be of type float so we can multiply it later in order to mask the elements
     # (1 = water, 2 = sky, 0 = obstacles)
     mask_water = gt_mask[:,1].unsqueeze(1)
-
     mask_obstacles = gt_mask[:,0].unsqueeze(1)
 
     # Count number of water and obstacle pixels
@@ -120,18 +119,18 @@ def contr_water_obstacle_separation_loss(features, gt_mask):
     mean_water = water_pixels.sum((0,2,3), keepdim=True) / elements_water
     mean_obstacles = obstacle_pixels.sum((0,2,3), keepdim=True) / elements_obstacles
 
-    # Mean water value matrices for water and obstacle pixels
+    # Mean water and obstacle value matrices for water pixels
     mean_water_wat = mean_water * mask_water
     mean_obstacle_wat = mean_obstacles * mask_water
 
     # Average square difference of water pixels (per channel, batch average)
     difference_water = (water_pixels - mean_water_wat).pow(2).sum((0,2,3), keepdim=True)
 
-    # Average square difference of water pixels and mean obstacle values (per channel)
+    # Average square difference of water pixels and mean obstacle values (per channel, batch average)
     difference_wat_obs = (water_pixels - mean_obstacle_wat).pow(2).sum((0,2,3), keepdim=True)
 
     # Compute the separation
-    loss_c = difference_water / (difference_wat_obs + epsilon_watercost)
+    loss_c = difference_water / (difference_wat_obs + epsilon)
 
     var_cost = loss_c.mean()
 
@@ -145,7 +144,7 @@ def contr_obstacle_water_separation_loss(features, gt_mask):
         gt_mask (torch.tensor): Ground truth tensor
         clipping_value (float): Clip loss at clipping_value * sigma
     """
-    epsilon_watercost = 0.01
+    epsilon = 0.01
     min_samples = 5
 
     # Resize gt mask to match the extracted features shape (x,y)
@@ -155,38 +154,37 @@ def contr_obstacle_water_separation_loss(features, gt_mask):
     # Create water and obstacles masks.
     # The masks should be of type float so we can multiply it later in order to mask the elements
     # (1 = water, 2 = sky, 0 = obstacles)
+    mask_obstacles = gt_mask[:,0].unsqueeze(1)
     mask_water = gt_mask[:,1].unsqueeze(1)
 
-    mask_obstacles = gt_mask[:,0].unsqueeze(1)
-
     # Count number of water and obstacle pixels
-    elements_water = mask_water.sum((0,2,3), keepdim=True)
     elements_obstacles = mask_obstacles.sum((0,2,3), keepdim=True)
+    elements_water = mask_water.sum((0,2,3), keepdim=True)
 
     # Zero loss if number of samples for any class is smaller than min_samples
     if elements_obstacles.squeeze() < min_samples or elements_water.squeeze() < min_samples:
         return torch.tensor(0.)
 
     # Only keep water and obstacle pixels. Set the rest to 0.
-    water_pixels = mask_water * features
     obstacle_pixels = mask_obstacles * features
+    water_pixels = mask_water * features
 
-    # Mean value of water pixels per feature (batch average)
-    mean_water = water_pixels.sum((0,2,3), keepdim=True) / elements_water
+    # Mean value of water and obstacle pixels per feature (batch average)
     mean_obstacles = obstacle_pixels.sum((0,2,3), keepdim=True) / elements_obstacles
+    mean_water = water_pixels.sum((0,2,3), keepdim=True) / elements_water
 
-    # Mean water value matrices for water and obstacle pixels
+    # Mean obstacle and water value matrices for obstacle pixels
     mean_obstacle_obs = mean_obstacles * mask_obstacles
     mean_water_obs = mean_water * mask_obstacles
 
-    # Average square difference of water pixels (per channel, batch average)
+    # Average square difference of obstacle pixels (per channel, batch average)
     difference_obstacle = (obstacle_pixels - mean_obstacle_obs).pow(2).sum((0,2,3), keepdim=True)
 
-    # Average square difference of water pixels and mean obstacle values (per channel)
+    # Average square difference of obstacle pixels and mean water values (per channel, batch average)
     difference_obs_wat = (obstacle_pixels - mean_water_obs).pow(2).sum((0,2,3), keepdim=True)
 
     # Compute the separation
-    loss_c = difference_obstacle / (difference_obs_wat + epsilon_watercost)
+    loss_c = difference_obstacle / (difference_obs_wat + epsilon)
 
     var_cost = loss_c.mean()
 
@@ -200,7 +198,69 @@ def contr_water_obstacle_combined_separation_loss(features, gt_mask):
         gt_mask (torch.tensor): Ground truth tensor
         clipping_value (float): Clip loss at clipping_value * sigma
     """
-    epsilon_watercost = 0.01
+    epsilon = 0.01
+    min_samples = 5
+
+    # Resize gt mask to match the extracted features shape (x,y)
+    feature_size = (features.size(2), features.size(3))
+    gt_mask = F.interpolate(gt_mask, size=feature_size, mode='area')
+
+    # Create obstacle and water masks.
+    # The masks should be of type float so we can multiply it later in order to mask the elements
+    # (1 = water, 2 = sky, 0 = obstacles)
+    mask_obstacles = gt_mask[:,0].unsqueeze(1)
+    mask_water = gt_mask[:,1].unsqueeze(1)
+
+    # Count number of obstacle and water pixels
+    elements_obstacles = mask_obstacles.sum((0,2,3), keepdim=True)
+    elements_water = mask_water.sum((0,2,3), keepdim=True)
+
+    # Zero loss if number of samples for any class is smaller than min_samples
+    if elements_obstacles.squeeze() < min_samples or elements_water.squeeze() < min_samples:
+        return torch.tensor(0.)
+
+    # Only keep obstacle and water pixels. Set the rest to 0.
+    obstacle_pixels = mask_obstacles * features
+    water_pixels = mask_water * features
+
+    # Mean value of obstacle and water pixels per feature (batch average)
+    mean_obstacles = obstacle_pixels.sum((0,2,3), keepdim=True) / elements_obstacles
+    mean_water = water_pixels.sum((0,2,3), keepdim=True) / elements_water
+
+    # Mean water and obstacle value matrices for water pixels
+    mean_water_wat = mean_water * mask_water
+    mean_obstacle_wat = mean_obstacles * mask_water
+    
+    # Mean obstacle and water value matrices for obstacle pixels
+    mean_obstacle_obs = mean_obstacles * mask_obstacles
+    mean_water_obs = mean_water * mask_obstacles
+
+    # Average square difference of water and obstacle pixels (per channel, batch average)
+    difference_water = (water_pixels - mean_water_wat).pow(2).sum((0,2,3), keepdim=True)
+    difference_obstacle = (obstacle_pixels - mean_obstacle_obs).pow(2).sum((0,2,3), keepdim=True)
+
+    # Average square difference of water pixels and mean obstacle values (per channel, batch average)
+    difference_wat_obs = (water_pixels - mean_obstacle_wat).pow(2).sum((0,2,3), keepdim=True)
+    # Average square difference of obstacle pixels and mean water values (per channel, batch average)
+    difference_obs_wat = (obstacle_pixels - mean_water_obs).pow(2).sum((0,2,3), keepdim=True)
+
+    # Compute the separation
+    loss_c_wsl = difference_water / (difference_wat_obs + epsilon)
+    loss_c_osl = difference_obstacle / (difference_obs_wat + epsilon)
+
+    var_cost = (loss_c_wsl + loss_c_osl).mean()
+    
+    return var_cost
+    
+def contr_water_sky_obstacle_combined_separation_loss(features, gt_mask):
+    """Computes the water-obstacle separation loss from intermediate features.
+
+    Args:
+        features (torch.tensor): Features tensor
+        gt_mask (torch.tensor): Ground truth tensor
+        clipping_value (float): Clip loss at clipping_value * sigma
+    """
+    epsilon = 0.01
     min_samples = 5
 
     # Resize gt mask to match the extracted features shape (x,y)
@@ -210,45 +270,179 @@ def contr_water_obstacle_combined_separation_loss(features, gt_mask):
     # Create water and obstacles masks.
     # The masks should be of type float so we can multiply it later in order to mask the elements
     # (1 = water, 2 = sky, 0 = obstacles)
+    mask_obstacles = gt_mask[:,0].unsqueeze(1)
+    mask_water = gt_mask[:,1].unsqueeze(1)
+    mask_sky = gt_mask[:,2].unsqueeze(1)
+
+    # Count number of obstacle and water and sky pixels
+    elements_obstacles = mask_obstacles.sum((0,2,3), keepdim=True)
+    elements_water = mask_water.sum((0,2,3), keepdim=True)
+    elements_sky = mask_sky.sum((0,2,3), keepdim=True)
+
+    # Zero loss if number of samples for any class is smaller than min_samples
+    if elements_obstacles.squeeze() < min_samples or elements_water.squeeze() < min_samples or elements_sky.squeeze() < min_samples:
+        return torch.tensor(0.)
+
+    # Only keep obstacle and water and sky pixels. Set the rest to 0.
+    obstacle_pixels = mask_obstacles * features
+    water_pixels = mask_water * features
+    sky_pixels = mask_sky * features
+
+    # Mean value of obstacle and water and sky pixels per feature (batch average)
+    mean_obstacles = obstacle_pixels.sum((0,2,3), keepdim=True) / elements_obstacles
+    mean_water = water_pixels.sum((0,2,3), keepdim=True) / elements_water
+    mean_sky = sky_pixels.sum((0,2,3), keepdim=True) / elements_sky
+
+    # Mean water and obstacle value matrices for water pixels
+    mean_water_wat = mean_water * mask_water
+    mean_obstacle_wat = mean_obstacles * mask_water
+    # Mean sky and obstacle value matrices for sky pixels
+    mean_sky_sky = mean_sky * mask_sky
+    mean_obstacle_sky = mean_obstacles * mask_sky
+
+    # Average square difference of water and sky pixels (per channel, batch average)
+    difference_water = (water_pixels - mean_water_wat).pow(2).sum((0,2,3), keepdim=True)
+    difference_sky = (sky_pixels - mean_sky_sky).pow(2).sum((0,2,3), keepdim=True)
+
+    # Average square difference of water pixels and mean obstacle values (per channel, batch average))
+    difference_wat_obs = (water_pixels - mean_obstacle_wat).pow(2).sum((0,2,3), keepdim=True)
+    # Average square difference of sky pixels and mean obstacle values (per channel, batch average))
+    difference_sky_obs = (sky_pixels - mean_obstacle_sky).pow(2).sum((0,2,3), keepdim=True)
+
+    # Compute the separation
+    loss_c_wsl = difference_water / (difference_wat_obs + epsilon)
+    loss_c_ssl = difference_sky / (difference_sky_obs + epsilon)
+
+    var_cost = (loss_c_wsl + loss_c_ssl).mean()
+    
+    return var_cost
+    
+def half_contr_water_obstacle_combined_separation_loss(features, gt_mask):
+    """Computes the water-obstacle separation loss from intermediate features.
+
+    Args:
+        features (torch.tensor): Features tensor
+        gt_mask (torch.tensor): Ground truth tensor
+        clipping_value (float): Clip loss at clipping_value * sigma
+    """
+    epsilon = 0.01
+    min_samples = 5
+
+    # Resize gt mask to match the extracted features shape (x,y)
+    feature_ch = features.size(1)
+    feature_size = (features.size(2), features.size(3))
+    gt_mask = F.interpolate(gt_mask, size=feature_size, mode='area')
+
+    # Create obstacle and water masks.
+    # The masks should be of type float so we can multiply it later in order to mask the elements
+    # (1 = water, 2 = sky, 0 = obstacles)
+    mask_obstacles = gt_mask[:,0].unsqueeze(1)
     mask_water = gt_mask[:,1].unsqueeze(1)
 
-    mask_obstacles = gt_mask[:,0].unsqueeze(1)
-
-    # Count number of water and obstacle pixels
-    elements_water = mask_water.sum((0,2,3), keepdim=True)
+    # Count number of obstacle and water pixels
     elements_obstacles = mask_obstacles.sum((0,2,3), keepdim=True)
+    elements_water = mask_water.sum((0,2,3), keepdim=True)
 
     # Zero loss if number of samples for any class is smaller than min_samples
     if elements_obstacles.squeeze() < min_samples or elements_water.squeeze() < min_samples:
         return torch.tensor(0.)
 
-    # Only keep water and obstacle pixels. Set the rest to 0.
-    water_pixels = mask_water * features
+    # Only keep obstacle and water pixels. Set the rest to 0.
     obstacle_pixels = mask_obstacles * features
+    water_pixels = mask_water * features
 
-    # Mean value of water pixels per feature (batch average)
-    mean_water = water_pixels.sum((0,2,3), keepdim=True) / elements_water
+    # Mean value of obstacle and water pixels per feature (batch average)
     mean_obstacles = obstacle_pixels.sum((0,2,3), keepdim=True) / elements_obstacles
+    mean_water = water_pixels.sum((0,2,3), keepdim=True) / elements_water
 
-    # Mean water value matrices for water and obstacle pixels
+    # Mean water and obstacle value matrices for water pixels
     mean_water_wat = mean_water * mask_water
     mean_obstacle_wat = mean_obstacles * mask_water
+    
+    # Mean obstacle and water value matrices for obstacle pixels
     mean_obstacle_obs = mean_obstacles * mask_obstacles
     mean_water_obs = mean_water * mask_obstacles
 
-    # Average square difference of water pixels (per channel, batch average)
+    # Average square difference of water and obstacle pixels (per channel, batch average)
     difference_water = (water_pixels - mean_water_wat).pow(2).sum((0,2,3), keepdim=True)
     difference_obstacle = (obstacle_pixels - mean_obstacle_obs).pow(2).sum((0,2,3), keepdim=True)
 
-    # Average square difference of water pixels and mean obstacle values (per channel)
+    # Average square difference of water pixels and mean obstacle values (per channel, batch average)
     difference_wat_obs = (water_pixels - mean_obstacle_wat).pow(2).sum((0,2,3), keepdim=True)
+    # Average square difference of obstacle pixels and mean water values (per channel, batch average)
     difference_obs_wat = (obstacle_pixels - mean_water_obs).pow(2).sum((0,2,3), keepdim=True)
 
     # Compute the separation
-    loss_c_wsl = difference_water / (difference_wat_obs + epsilon_watercost)
-    loss_c_osl = difference_obstacle / (difference_obs_wat + epsilon_watercost)
+    loss_c_wsl = difference_water / (difference_wat_obs + epsilon)
+    loss_c_osl = difference_obstacle / (difference_obs_wat + epsilon)
 
-    var_cost = (loss_c_wsl + loss_c_osl).mean()
+    var_cost = (loss_c_wsl[:,:feature_ch//2].sum() + loss_c_osl[:,feature_ch//2:].sum()) / feature_ch
+    
+    return var_cost
+      
+def half_contr_water_sky_obstacle_combined_separation_loss(features, gt_mask):
+    """Computes the water-obstacle separation loss from intermediate features.
+
+    Args:
+        features (torch.tensor): Features tensor
+        gt_mask (torch.tensor): Ground truth tensor
+        clipping_value (float): Clip loss at clipping_value * sigma
+    """
+    epsilon = 0.01
+    min_samples = 5
+
+    # Resize gt mask to match the extracted features shape (x,y)
+    feature_ch = features.size(1)
+    feature_size = (features.size(2), features.size(3))
+    gt_mask = F.interpolate(gt_mask, size=feature_size, mode='area')
+
+    # Create water and obstacles masks.
+    # The masks should be of type float so we can multiply it later in order to mask the elements
+    # (1 = water, 2 = sky, 0 = obstacles)
+    mask_obstacles = gt_mask[:,0].unsqueeze(1)
+    mask_water = gt_mask[:,1].unsqueeze(1)
+    mask_sky = gt_mask[:,2].unsqueeze(1)
+
+    # Count number of obstacle and water and sky pixels
+    elements_obstacles = mask_obstacles.sum((0,2,3), keepdim=True)
+    elements_water = mask_water.sum((0,2,3), keepdim=True)
+    elements_sky = mask_sky.sum((0,2,3), keepdim=True)
+
+    # Zero loss if number of samples for any class is smaller than min_samples
+    if elements_obstacles.squeeze() < min_samples or elements_water.squeeze() < min_samples or elements_sky.squeeze() < min_samples:
+        return torch.tensor(0.)
+
+    # Only keep obstacle and water and sky pixels. Set the rest to 0.
+    obstacle_pixels = mask_obstacles * features
+    water_pixels = mask_water * features
+    sky_pixels = mask_sky * features
+
+    # Mean value of obstacle and water and sky pixels per feature (batch average)
+    mean_obstacles = obstacle_pixels.sum((0,2,3), keepdim=True) / elements_obstacles
+    mean_water = water_pixels.sum((0,2,3), keepdim=True) / elements_water
+    mean_sky = sky_pixels.sum((0,2,3), keepdim=True) / elements_sky
+
+    # Mean water and obstacle value matrices for water pixels
+    mean_water_wat = mean_water * mask_water
+    mean_obstacle_wat = mean_obstacles * mask_water
+    # Mean sky and obstacle value matrices for sky pixels
+    mean_sky_sky = mean_sky * mask_sky
+    mean_obstacle_sky = mean_obstacles * mask_sky
+
+    # Average square difference of water and sky pixels (per channel, batch average)
+    difference_water = (water_pixels - mean_water_wat).pow(2).sum((0,2,3), keepdim=True)
+    difference_sky = (sky_pixels - mean_sky_sky).pow(2).sum((0,2,3), keepdim=True)
+
+    # Average square difference of water pixels and mean obstacle values (per channel, batch average))
+    difference_wat_obs = (water_pixels - mean_obstacle_wat).pow(2).sum((0,2,3), keepdim=True)
+    # Average square difference of sky pixels and mean obstacle values (per channel, batch average))
+    difference_sky_obs = (sky_pixels - mean_obstacle_sky).pow(2).sum((0,2,3), keepdim=True)
+
+    # Compute the separation
+    loss_c_wsl = difference_water / (difference_wat_obs + epsilon)
+    loss_c_ssl = difference_sky / (difference_sky_obs + epsilon)
+
+    var_cost = (loss_c_wsl[:,:feature_ch//2].sum() + loss_c_ssl[:,feature_ch//2:].sum()) / feature_ch
     
     return var_cost
     
