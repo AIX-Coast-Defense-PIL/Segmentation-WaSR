@@ -4,7 +4,9 @@
 # Project specific
 WaSR/output/
 WaSR/old_output/
+WaSR/nex_logs/
 yolov5/runs/
+yolov4/runs/
 yolov4/inference/
 ScaledYOLOv4/runs/
 results/

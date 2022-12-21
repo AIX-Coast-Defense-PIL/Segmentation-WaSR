@@ -187,35 +187,35 @@ def predict(args):
                     yolo_box = [int(y) for y in yolo_pred[0]]
                     obs_bin[yolo_box[1]:yolo_box[3], yolo_box[0]:yolo_box[2]] = 0
 
-                    
-                ###### Connected Component Labeling ######
-                ccl_num_labels, ccl_labels, ccl_stats, ccl_centroids = cv2.connectedComponentsWithStats(obs_bin)
-
-                ###### Ground Removal ######
-                unk_predn = [] # unknown prediction
-                for x,y,w,h,a in ccl_stats:
-                    ccl_cond = True
-                    
-                    if a < (obs_bin.shape[1]*0.008)**2:
-                        ccl_cond = False
                 
-                    eps = 0.3
-                    if x < 5: x += 5
-                    if y < 5: y += 5
-                    obs_box = obs_bin[y-5:y+h+5, x-5:x+w+5]
-                    surr_pix = cv2.dilate(obs_box, np.ones((5,5), np.uint8), iterations=1) - obs_box
-                    sum_pix = surr_pix.sum()
-                    surr_pix = np.multiply(wasr_pred[y-5:y+h+5, x-5:x+w+5, 0],surr_pix.astype(int))
-                    if surr_pix.sum() != 0:
-                        if ((surr_pix==90).sum() / sum_pix > eps) or (w > obs_bin.shape[1]*0.95): 
-                            ccl_cond = False
+            ###### Connected Component Labeling ######
+            ccl_num_labels, ccl_labels, ccl_stats, ccl_centroids = cv2.connectedComponentsWithStats(obs_bin)
 
-                    if ccl_cond:
-                        unk_predn.append([x, y, x+w, y+h, 1, 0]) # x y x y conf cls
-                        unk_box = (torch.tensor([x, y, x+w, y+h]).view(1,4) / gn * gn2).view(-1).tolist()
-                        box_draw.rectangle(unk_box, outline=(255,0,0), width = 2)
-                unk_predn = torch.tensor(unk_predn, device=device)
+            ###### Ground Removal ######
+            unk_predn = [] # unknown prediction
+            for x,y,w,h,a in ccl_stats:
+                ccl_cond = True
+                
+                if a < (obs_bin.shape[1]*0.008)**2:
+                    ccl_cond = False
             
+                eps = 0.3
+                if x < 5: x += 5
+                if y < 5: y += 5
+                obs_box = obs_bin[y-5:y+h+5, x-5:x+w+5]
+                surr_pix = cv2.dilate(obs_box, np.ones((5,5), np.uint8), iterations=1) - obs_box
+                sum_pix = surr_pix.sum()
+                surr_pix = np.multiply(wasr_pred[y-5:y+h+5, x-5:x+w+5, 0],surr_pix.astype(int))
+                if surr_pix.sum() != 0:
+                    if ((surr_pix==90).sum() / sum_pix > eps) or (w > obs_bin.shape[1]*0.95): 
+                        ccl_cond = False
+
+                if ccl_cond:
+                    unk_predn.append([x, y, x+w, y+h, 1, 0]) # x y x y conf cls
+                    unk_box = (torch.tensor([x, y, x+w, y+h]).view(1,4) / gn * gn2).view(-1).tolist()
+                    box_draw.rectangle(unk_box, outline=(255,0,0), width = 2)
+            unk_predn = torch.tensor(unk_predn, device=device)
+        
             mask_img = Image.fromarray(wasr_pred)
             mask_img.save(output_dir / 'seg_images' / labels['mask_filename'][i])
             box_img.save(output_dir / 'unk_images' / labels['mask_filename'][i])
