@@ -8,7 +8,8 @@ import pytorch_lightning as pl
 from .loss import focal_loss, water_obstacle_separation_loss, contr_water_obstacle_separation_loss, \
                     contr_obstacle_water_separation_loss, contr_water_obstacle_combined_separation_loss, \
                     contr_water_sky_obstacle_combined_separation_loss, half_contr_water_obstacle_combined_separation_loss, \
-                    half_contr_water_sky_obstacle_combined_separation_loss
+                    half_contr_water_sky_obstacle_combined_separation_loss, contr_water_sky_separation_loss, \
+                    contr_obstacle_sky_separation_loss, contr_sky_obstacle_separation_loss, contr_sky_water_separation_loss
 from .metrics import PixelAccuracy, ClassIoU
 
 NUM_EPOCHS = 50
@@ -39,7 +40,9 @@ class LitModel(pl.LightningModule):
                             help="Regularisation parameter for L2-loss.")
         parser.add_argument("--focal_loss_scale", type=str, default=FOCAL_LOSS_SCALE, choices=['logits', 'labels'],
                             help="Which scale to use for focal loss computation (logits or labels).")
-        parser.add_argument("--separation_loss", type=str, default=SEPAR_LOSS, choices=['wsl', 'cwsl', 'cosl', 'cwssl', 'cwosl', 'hwssl', 'hwosl', 'None'],
+        parser.add_argument("--separation_loss", type=str, default=SEPAR_LOSS, 
+                            choices=['wsl', 'cwsl', 'cosl', 'cwssl', 'cwosl', 'hwssl', 'hwosl',
+                                     'cwskyl', 'coskyl', 'cskyol', 'cskywl', 'None'],
                             help="Select seperation loss (wsl or cwsl or None)")
         # parser.add_argument("--no_separation_loss", action='store_true', help="Disable separation loss.")
         parser.add_argument("--separation_loss_lambda", default=SL_LAMBDA, type=float,
@@ -93,6 +96,14 @@ class LitModel(pl.LightningModule):
             separation_loss = half_contr_water_sky_obstacle_combined_separation_loss(out['aux'], labels['segmentation'])
         elif self.separation_loss == 'hwosl':
             separation_loss = half_contr_water_obstacle_combined_separation_loss(out['aux'], labels['segmentation'])
+        elif self.separation_loss == 'cwskyl':
+            separation_loss = contr_water_sky_separation_loss(out['aux'], labels['segmentation'])
+        elif self.separation_loss == 'coskyl':
+            separation_loss = contr_obstacle_sky_separation_loss(out['aux'], labels['segmentation'])
+        elif self.separation_loss == 'cskyol':
+            separation_loss = contr_sky_obstacle_separation_loss(out['aux'], labels['segmentation'])
+        elif self.separation_loss == 'cskywl':
+            separation_loss = contr_sky_water_separation_loss(out['aux'], labels['segmentation'])
         else:
             separation_loss = torch.tensor(0.0)
 
