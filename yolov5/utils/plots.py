@@ -185,7 +185,7 @@ def output_to_target(output):
 
 
 @threaded
-def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max_size=1920, max_subplots=16):
+def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max_size=1920, max_subplots=16, plot_conf=True):
     # Plot image grid with labels
     if isinstance(images, torch.Tensor):
         images = images.cpu().float().numpy()
@@ -241,7 +241,7 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
                 color = colors(cls)
                 cls = names[cls] if names else cls
                 if labels or conf[j] > 0.25:  # 0.25 conf thresh
-                    label = f'{cls}' if labels else f'{cls} {conf[j]:.1f}'
+                    label = f'{cls}' if labels or not plot_conf else f'{cls} {conf[j]:.1f}'
                     annotator.box_label(box, label, color=color)
     annotator.im.save(fname)  # save
 

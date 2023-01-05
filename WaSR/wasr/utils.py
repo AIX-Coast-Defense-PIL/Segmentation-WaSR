@@ -105,10 +105,10 @@ def tensor_map(obj, fn):
 
 
 def get_box_coord(raw_size, x,y,w,h):
-    x *= raw_size[0]
-    y *= raw_size[1]
-    w *= raw_size[0]
-    h *= raw_size[1]
+    x *= raw_size[1]
+    y *= raw_size[0]
+    w *= raw_size[1]
+    h *= raw_size[0]
     
     x1 = x - w/2
     x2 = x + w/2
