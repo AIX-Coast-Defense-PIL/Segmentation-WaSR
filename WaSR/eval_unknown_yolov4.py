@@ -34,7 +34,7 @@ from yolov5.utils.torch_utils import select_device, time_sync
 sys.path.remove('/home/leeyoonji/workspace/git/yolov5')
 sys.path.append('/home/leeyoonji/workspace/git/yolov4')
 sys.path.append('/home/leeyoonji/workspace/git/yolov4/utils')
-from yolov4.models.models import Darknet
+from yolov4.models.models import Darknet, load_darknet_weights
 
 
 import warnings
@@ -124,7 +124,7 @@ def predict(args):
     predictor = Predictor(wasr_model, args.fp16)
 
     output_dir = Path(args.output_dir)
-    for dname in ['yolo_labels', 'seg_images', 'unk_images', 'yolo_images', 'obs_images']:
+    for dname in ['yolo_labels', 'seg_images', 'unk_images', 'yolo_images', 'obs_images', 'label_images']:
         os.makedirs(output_dir/dname, exist_ok=True)
 
     ###### yolo ######
@@ -147,8 +147,7 @@ def predict(args):
         load_darknet_weights(yolo_model, args.yolo_weights[0])
     yolo_model.to(device).eval()
     
-    stride = 32
-    pt = True
+    stride, pad, pt = 32, 0, True
     imgsz = check_img_size(args.imgsz)  # check image size
     
     cuda = device.type != 'cpu'
@@ -158,24 +157,15 @@ def predict(args):
     # Dataloader
     ###### yolo ######
     bs = args.batch_size  # batch_size
-    yolo_dl = create_dataloader(source,
+    dl = create_dataloader(source,
                                 imgsz,
                                 bs,
                                 stride,
                                 single_cls=True,
-                                pad=0.5,
+                                pad=pad,
                                 rect=pt, # square inference for benchmarks
                                 workers=args.workers,
                                 prefix=colorstr('test: '))[0]
-
-    ###### wasr ######
-    if ('seaships' in args.dataset_config) or ('testdata' in args.dataset_config):
-        transform = get_image_resize()
-    else: transform = None
-    
-    wasr_ds = MaSTr1325Dataset(args.dataset_config, normalize_t=PytorchHubNormalization(), 
-                               sort=True, yolo_resize=(bs, imgsz, stride, 0.5, pt))
-    wasr_dl = DataLoader(wasr_ds, batch_size=bs, num_workers=args.workers)
 
     # Run inference
     seen, dt = 0, [0.0, 0.0, 0.0]
@@ -184,13 +174,9 @@ def predict(args):
     dt, p, r, f1, mp, mr, map50, map = [0.0, 0.0, 0.0, 0.0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     stats, ap, ap_class = [], [], []
     
-    for [features, labels], [im, targets, paths, shapes]  in tqdm(zip(iter(wasr_dl), yolo_dl), total=len(wasr_dl)):
-        # features['image'] : (1, 3, 384, 512)
+    for (im, targets, paths, shapes)  in tqdm(dl):
         # im : (3, 288, 512)
         # im0s : (1080, 1920, 3)
-        
-        ###### wasr ######
-        wasr_preds = predictor.predict_batch(features) # (1, 384, 512)
 
         ###### yolo ######
         t1 = time_sync()
@@ -208,8 +194,12 @@ def predict(args):
         box_draw = ImageDraw.Draw(box_img)
         yolo_img = transform(im[0,:,:,:])
         yolo_draw = ImageDraw.Draw(yolo_img)
+        label_img = transform(im[0,:,:,:])
+        label_draw = ImageDraw.Draw(label_img)
 
         # Inference
+        wasr_preds = predictor.predict_batch({'image':im}) # (1, 3, 384, 512)
+
         yolo_preds = yolo_model(im, augment=args.augment)[0]
         t3 = time_sync()
         dt[1] += t3 - t2
@@ -230,8 +220,8 @@ def predict(args):
             obs_bin = np.uint8(np.where(wasr_pred[:,:,0]==247,1,0)) # binary (obstacle=1, other(sky,sea)=0)
             
             ###### yolo ######
-            yolo_lb = targets[targets[:, 0] == p_i, 1:]
-            nl, npr = yolo_lb.shape[0], yolo_pred.shape[0]  # number of labels, predictions
+            unk_lb = targets[targets[:, 0] == p_i, 1:]
+            nl, npr = unk_lb.shape[0], yolo_pred.shape[0]  # number of labels, predictions
             correct = torch.zeros(npr, niou, dtype=torch.bool, device=device)  # init
             yolo_pred[:, 5] = 0
             seen += 1
@@ -303,22 +293,24 @@ def predict(args):
             unk_predn = torch.tensor(unk_predn, device=device)
             
             # Evaluate
+            tbox = (xywh2xyxy(unk_lb[:, 1:5]) * gn2.to(device)).round()  # target boxes
+            for b in tbox:
+                label_draw.rectangle(b.tolist(), outline=(255,0,0), width = 2)
             if len(unk_predn):
-                tbox = xywh2xyxy(yolo_lb[:, 1:5])  # target boxes
-                # scale_coords(im[si].shape[1:], tbox, shape, shapes[si][1])  # native-space labels
-                labelsn = torch.cat((yolo_lb[:, 0:1], tbox), 1)  # native-space labels
+                labelsn = torch.cat((unk_lb[:, 0:1], tbox), 1)  # native-space labels
                 correct = process_batch(unk_predn, labelsn, iouv)
             # stats.append((correct, yolo_pred[:, 4], yolo_pred[:, 5], yolo_lb[:, 0]))  # (correct, conf, pcls, tcls)
             stats.append((correct, torch.ones(len(correct), device=device), 
-                        torch.zeros(len(correct), device=device), yolo_lb[:, 0]))  # (correct, conf, pcls, tcls)
+                        torch.zeros(len(correct), device=device), unk_lb[:, 0]))  # (correct, conf, pcls, tcls)
             dt[3] += time_sync() - t4
             
             mask_img = Image.fromarray(wasr_pred)
-            mask_img.save(output_dir / 'seg_images' / labels['mask_filename'][p_i])
-            box_img.save(output_dir / 'unk_images' / labels['mask_filename'][p_i])
-            yolo_img.save(output_dir / 'yolo_images' / labels['mask_filename'][p_i])
+            mask_img.save(output_dir / 'seg_images' / os.path.basename(paths[p_i]))
+            box_img.save(output_dir / 'unk_images' / os.path.basename(paths[p_i]))
+            yolo_img.save(output_dir / 'yolo_images' / os.path.basename(paths[p_i]))
             obs_img = Image.fromarray(obs_bin*255)
-            obs_img.save(output_dir / 'obs_images' / labels['mask_filename'][p_i])
+            obs_img.save(output_dir / 'obs_images' / os.path.basename(paths[p_i]))
+            label_img.save(output_dir / 'label_images' / os.path.basename(paths[p_i]))
 
         # Print time (inference-only)
         # LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
@@ -330,19 +322,21 @@ def predict(args):
         for key, value in vars(args).items(): 
             f.write('%s:%s\n' % (key, value))
         
-        f.write('the number of data : %d\n\n' % (len(wasr_ds)))
+        f.write('the number of data : %d\n\n' % (len(dl)))
     
     ###### yolo ######
     # Compute metrics
     stats = [torch.cat(i, 0).cpu().numpy() for i in zip(*stats)]  # to numpy
     if len(stats) and stats[0].any():
-        tp, fp, p, r, f1, ap, ap_class = ap_per_class(*stats, save_dir=output_dir, names=names)
+        tp, fp, p, r, f1, ap, ap_class = ap_per_class(*stats)
         ap50, ap = ap[:, 0], ap.mean(1)  # AP@0.5, AP@0.5:0.95
         mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
     nt = np.bincount(stats[3].astype(int), minlength=1)  # number of targets per class
 
     # Print results
+    pf_title = '%20s' * 7  # print format
     pf = '%20s' + '%11i' * 2 + '%11.3g' * 4  # print format
+    LOGGER.info(pf_title % ('names', 'num_data', 'num_obj', 'precision', 'recall', 'ap50', 'ap'))
     LOGGER.info(pf % ('all', seen, nt.sum(), mp, mr, map50, map))
     if nt.sum() == 0:
         LOGGER.warning('WARNING: no labels found in test set, can not compute metrics without labels')

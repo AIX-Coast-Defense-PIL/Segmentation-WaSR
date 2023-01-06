@@ -24,11 +24,15 @@ import sys
 sys.path.append('/home/leeyoonji/workspace/git')
 sys.path.append('/home/leeyoonji/workspace/git/yolov5')
 
-from yolov5.models.common import DetectMultiBackend
 from yolov5.utils.dataloaders import IMG_FORMATS, VID_FORMATS, LoadImages, LoadStreams
 from yolov5.utils.general import (LOGGER, check_file, check_img_size, check_imshow, colorstr,
                             non_max_suppression, scale_coords, xyxy2xywh)
 from yolov5.utils.torch_utils import select_device, time_sync
+
+sys.path.remove('/home/leeyoonji/workspace/git/yolov5')
+sys.path.append('/home/leeyoonji/workspace/git/yolov4')
+sys.path.append('/home/leeyoonji/workspace/git/yolov4/utils')
+from yolov4.models.models import Darknet, load_darknet_weights
 
 import warnings
 warnings.filterwarnings(action='ignore')
@@ -62,6 +66,7 @@ def get_arguments():
     
     ###### yolo ######
     parser.add_argument('--yolo_weights', nargs='+', type=str, required=True, help='model path(s)')
+    parser.add_argument('--yolo_cfg', type=str, default='models/yolov4.cfg', help='*.cfg path')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='confidence threshold')
@@ -76,14 +81,6 @@ def get_arguments():
 
 
 def predict(args):
-        
-    ###### wasr ######
-    transform = get_image_resize() if 'seaships' in args.dataset_config else None
-    
-    wasr_ds = MaSTr1325Dataset(args.dataset_config, transform=transform,
-                               normalize_t=PytorchHubNormalization(), sort=True)
-    wasr_dl = DataLoader(wasr_ds, batch_size=args.batch_size, num_workers=1)
-
     # Prepare model
     wasr_model = models.get_model(args.model, pretrained=False)
     state_dict = load_weights(args.wasr_weights)
@@ -91,7 +88,7 @@ def predict(args):
     predictor = Predictor(wasr_model, args.fp16)
 
     output_dir = Path(args.output_dir)
-    for dname in ['yolo_labels', 'seg_images', 'unk_images']:
+    for dname in ['unk_images']:
         os.makedirs(output_dir/dname, exist_ok=True)
 
     ###### yolo ######
@@ -105,31 +102,36 @@ def predict(args):
 
     # Load model
     device = select_device(args.device)
-    yolo_model = DetectMultiBackend(args.yolo_weights, device=device, fp16=args.fp16)
-    stride, names, pt = yolo_model.stride, yolo_model.names, yolo_model.pt
+    yolo_model = Darknet(args.yolo_cfg, args.imgsz).cuda()
+    try:
+        yolo_model.load_state_dict(torch.load(args.yolo_weights[0], map_location=device)['model'])
+        #model = attempt_load(weights, map_location=device)  # load FP32 model
+        #imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
+    except:
+        load_darknet_weights(yolo_model, args.yolo_weights[0])
+    yolo_model.to(device).eval()
+    
+    stride, pad, pt = 32, 0, True
     args.imgsz *= 2 if len(args.imgsz) == 1 else 1  # expand
-    imgsz = check_img_size(args.imgsz, s=stride)  # check image size
-
+    imgsz = check_img_size(args.imgsz)  # check image size
+    
     # Dataloader
-    yolo_dl = LoadImages(source, img_size=imgsz, stride=stride, auto=pt)
+    dl = LoadImages(source, img_size=imgsz, stride=stride, auto=pt)
     bs = args.batch_size  # batch_size
 
-
     # Run inference
-    yolo_model.warmup(imgsz=(1 if pt else bs, 3, *imgsz))  # warmup
-    seen, dt = 0, [0.0, 0.0, 0.0]
-    for [features, labels], [path, im, im0s, _, s]  in tqdm(zip(iter(wasr_dl), yolo_dl), total=len(wasr_dl)):
+    seen, dt = 0, [0.0, 0.0, 0.0, 0.0]
+    names = {0: 'Unknown'}
+    s = ('%20s' + '%11s' * 6) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
+    for [path, im, im0s, _, s]  in tqdm(dl):
         # features['image'] : (1, 3, 384, 512)
         # im : (3, 288, 512)
         # im0s : (1080, 1920, 3)
-        
-        ###### wasr ######
-        wasr_preds = predictor.predict_batch(features) # (1, 384, 512)
 
         ###### yolo ######
         t1 = time_sync()
         im = torch.from_numpy(im).to(device)
-        im = im.half() if yolo_model.fp16 else im.float()  # uint8 to fp16/32
+        im = im.half() if args.fp16 else im.float()  # uint8 to fp16/32
         im /= 255  # 0 - 255 to 0.0 - 1.0
         if len(im.shape) == 3:
             im = im[None]  # expand for batch dim # (1, 3, 288, 512)
@@ -140,7 +142,11 @@ def predict(args):
         box_draw = ImageDraw.Draw(box_img)
 
         # Inference
-        yolo_preds = yolo_model(im, augment=args.augment)
+        ###### wasr ######
+        wasr_preds = predictor.predict_batch({'image':im}) # (1, 3, 384, 512)
+
+        ###### yolo ######
+        yolo_preds = yolo_model(im, augment=args.augment)[0]
         t3 = time_sync()
         dt[1] += t3 - t2
 
@@ -154,16 +160,15 @@ def predict(args):
 
         # Process predictions
         for i, (wasr_pred, yolo_pred) in enumerate(zip(wasr_preds, yolo_preds)):  # per image
+            t4 = time_sync()
             ###### wasr ######
             wasr_pred = SEGMENTATION_COLORS[wasr_pred]
             obs_bin = np.uint8(np.where(wasr_pred[:,:,0]==247,1,0)) # binary (obstacle=1, other(sky,sea)=0)
+            yolo_pred[:, 5] = 0
             
             ###### yolo ######
             seen += 1
-            p, frame = path, getattr(yolo_dl, 'frame', 0)
 
-            p = Path(p)  # to Path
-            txt_path = str(output_dir / 'yolo_labels' / p.stem) + ('' if yolo_dl.mode == 'image' else f'_{frame}')  # im.txt
             s += '%gx%g ' % im.shape[2:]  # print string
             gn = torch.tensor(obs_bin.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             gn2 = torch.tensor(im.shape)[[3, 2, 3, 2]]
@@ -179,13 +184,14 @@ def predict(args):
                 # Write results
                 for *xyxy, conf, cls in reversed(yolo_pred):
                     xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                    line = (cls, *xywh, conf) if args.save_conf else (cls, *xywh)  # label format
-                    with open(f'{txt_path}.txt', 'a') as f:
-                        f.write(('%g ' * len(line)).rstrip() % line + '\n')
         
                     ###### remove ships ######
-                    yolo_box = [int(y) for y in yolo_pred[0]]
-                    obs_bin[yolo_box[1]:yolo_box[3], yolo_box[0]:yolo_box[2]] = 0
+                    yolo_box = [int(y.item()) for y in xyxy]
+                    thr = thr_x = thr_y = 5
+                    if yolo_box[1]<thr: thr_y = 0
+                    if yolo_box[0]<thr: thr_x = 0
+                    obs_bin[yolo_box[1]-thr_y : yolo_box[3]+thr, yolo_box[0]-thr_x : yolo_box[2]+thr] = 0
+                    # obs_bin[yolo_box[1]:yolo_box[3], yolo_box[0]:yolo_box[2]] = 0
 
                 
             ###### Connected Component Labeling ######
@@ -196,7 +202,8 @@ def predict(args):
             for x,y,w,h,a in ccl_stats:
                 ccl_cond = True
                 
-                if a < (obs_bin.shape[1]*0.008)**2:
+                # if a < (obs_bin.shape[1]*0.008)**2: # remove tiny objects (noise)
+                if a < (obs_bin.shape[1]*0.01)**2: # remove tiny objects (noise)
                     ccl_cond = False
             
                 eps = 0.3
@@ -214,11 +221,9 @@ def predict(args):
                     unk_predn.append([x, y, x+w, y+h, 1, 0]) # x y x y conf cls
                     unk_box = (torch.tensor([x, y, x+w, y+h]).view(1,4) / gn * gn2).view(-1).tolist()
                     box_draw.rectangle(unk_box, outline=(255,0,0), width = 2)
-            unk_predn = torch.tensor(unk_predn, device=device)
         
-            mask_img = Image.fromarray(wasr_pred)
-            mask_img.save(output_dir / 'seg_images' / labels['mask_filename'][i])
-            box_img.save(output_dir / 'unk_images' / labels['mask_filename'][i])
+            dt[3] += time_sync() - t4
+            box_img.save(output_dir / 'unk_images' / os.path.basename(path))
 
         # Print time (inference-only)
         # LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
@@ -230,12 +235,12 @@ def predict(args):
         for key, value in vars(args).items(): 
             f.write('%s:%s\n' % (key, value))
         
-        f.write('the number of data : %d\n\n' % (len(wasr_ds)))
+        f.write('the number of data : %d\n\n' % (len(dl)))
     
     ###### yolo ######
     # Print results
     t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
-    LOGGER.info(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS per image at shape {(1, 3, *imgsz)}' % t)
+    LOGGER.info(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS, %.1fms inference2 per image at shape {(1, 3, *imgsz)}' % t)
     s = f"\n{len(list(output_dir.glob('labels/*.txt')))} labels saved to {output_dir / 'labels'}"
     LOGGER.info(f"Results saved to {colorstr('bold', output_dir)}{s}")
 

@@ -1,7 +1,10 @@
-from utils.google_utils import *
-from utils.layers import *
-from utils.parse_config import *
-from utils import torch_utils
+import sys 
+sys.path.append('/home/leeyoonji/workspace/git/yolov4')
+
+from yolov4.utils.google_utils import *
+from yolov4.utils.layers import *
+from yolov4.utils.parse_config import *
+from yolov4.utils import torch_utils
 
 ONNX_EXPORT = False
 

@@ -4,6 +4,8 @@
 # Project specific
 WaSR/output/
 WaSR/old_output/
+WaSR/output_brightness/
+WaSR/output_loss/
 WaSR/nex_logs/
 yolov5/runs/
 yolov4/runs/
