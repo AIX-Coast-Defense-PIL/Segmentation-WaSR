@@ -7,6 +7,8 @@ import torch
 import torchvision.transforms.functional as TF
 import yaml
 
+from datasets.transforms import get_image_resize
+
 def read_mask(path):
     """Reads class segmentation mask from an image file."""
     mask = np.array(Image.open(path))
@@ -59,7 +61,7 @@ class MaSTr1325Dataset(torch.utils.data.Dataset):
             
             if sort:
                 self.images.sort()
-
+            
         self.transform = transform
         self.normalize_t = normalize_t
         self.include_original = include_original
@@ -78,7 +80,7 @@ class MaSTr1325Dataset(torch.utils.data.Dataset):
         img = np.array(Image.open(img_path))
         img_original = img
 
-        data = {'image': img}
+        data = {'image': img} # img (384, 512, 3)
 
         if self.mask_dir is not None:
             mask_path = str(self.mask_dir / mask_filename)

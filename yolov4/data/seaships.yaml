@@ -1,0 +1,11 @@
+# train and val datasets (image directory or *.txt file with image paths)
+train: /home/leeyoonji/workspace/git/yolov4/data/seaships/train.txt
+val: /home/leeyoonji/workspace/git/yolov4/data/seaships/val.txt
+test: /home/leeyoonji/workspace/git/yolov4/data/seaships/test.txt
+
+# number of classes
+nc: 6
+
+# class names
+names: ['ore carrier', 'bulk cargo carrier', 'container ship', 
+        'general cargo ship', 'fishing boat', 'mixed type']
