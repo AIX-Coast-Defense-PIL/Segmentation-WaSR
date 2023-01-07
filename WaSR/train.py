@@ -27,7 +27,7 @@ PRECISION = 32
 MODEL = 'wasr_resnet101_imu'
 MONITOR_VAR = 'val/iou/obstacle'
 MONITOR_VAR_MODE = 'max'
-
+NORMALIZE_B = None # True or None
 
 
 def get_arguments(input_args=None):
@@ -78,7 +78,7 @@ def train_wasr(args):
         transform = get_augmentation_transform()
 
     train_ds = MaSTr1325Dataset(args.train_config, transform=transform,
-                                normalize_t=normalize_t)
+                                normalize_t=normalize_t, normalize_b = NORMALIZE_B)
 
     train_dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
                             num_workers=args.workers, drop_last=True)
@@ -114,7 +114,7 @@ def train_wasr(args):
     trainer = pl.Trainer(logger=logger,
                          gpus=args.gpus,
                          max_epochs=args.epochs,
-                        #  strategy='ddp',
+                         accelerator='ddp',
                          resume_from_checkpoint=args.resume_from,
                          callbacks=callbacks,
                          sync_batchnorm=True,

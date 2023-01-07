@@ -6,8 +6,7 @@ import numpy as np
 import torch
 import torchvision.transforms.functional as TF
 import yaml
-
-from datasets.transforms import get_image_resize
+import cv2
 
 def read_mask(path):
     """Reads class segmentation mask from an image file."""
@@ -65,6 +64,7 @@ class MaSTr1325Dataset(torch.utils.data.Dataset):
         self.transform = transform
         self.normalize_t = normalize_t
         self.include_original = include_original
+        self.normalize_b = normalize_b
 
     def __len__(self):
         return len(self.images)
@@ -96,6 +96,12 @@ class MaSTr1325Dataset(torch.utils.data.Dataset):
         if self.transform is not None:
             data = self.transform(data)
             img = data['image']
+
+        if self.normalize_b is not None:
+            hsv_img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+            img_v_mean = np.mean(hsv_img[:,:,2])
+            hsv_img[:,:,2] = np.clip(hsv_img[:,:,2].astype(np.uint64) - (img_v_mean - 157.566) ,0,255) # mastr+aihub mean = 157.5663538901869
+            img = cv2.cvtColor(hsv_img, cv2.COLOR_HSV2RGB)
 
         if self.normalize_t is not None:
             img = self.normalize_t(img)
